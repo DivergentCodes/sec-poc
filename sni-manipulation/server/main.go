@@ -6,12 +6,25 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 //go:embed certs/server.crt certs/server.key
 var certsFS embed.FS
 
 func main() {
+	var host string
+	var port string
+
+	if len(os.Args) != 3 {
+		fmt.Println("Usage: ./server <host> <port>")
+		os.Exit(1)
+	}
+
+	host = os.Args[1]
+	port = os.Args[2]
+
+	addr := fmt.Sprintf("%s:%s", host, port)
 	certPEMBytes, err := certsFS.ReadFile("certs/server.crt")
 	if err != nil {
 		log.Fatal(err)
@@ -27,7 +40,7 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    ":8443",
+		Addr:    addr,
 		Handler: http.HandlerFunc(handleRequest),
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -38,7 +51,7 @@ func main() {
 		},
 	}
 
-	fmt.Println("HTTPS Server is running on https://localhost:8443")
+	fmt.Printf("HTTPS Server is running on https://%s\n", addr)
 	log.Fatal(server.ListenAndServeTLS("", ""))
 }
 

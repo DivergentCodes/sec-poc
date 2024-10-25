@@ -12,6 +12,12 @@ OPENSSL=openssl
 KEY_FILE=$(CERTS_DIR)/server.key
 CERT_FILE=$(CERTS_DIR)/server.crt
 
+# CLI parameters
+HOST=localhost
+PORT=8443
+TARGET_HOST=https://$(HOST):$(PORT)
+SNI_VALUE=spoofed.com
+
 all: build
 
 build: create-dirs generate-certs build-client build-server
@@ -34,10 +40,10 @@ clean:
 	rm -rf $(DIST_DIR)
 	rm -rf $(CERTS_DIR)
 
-run-client:
-	./$(DIST_DIR)/$(BINARY_NAME_CLIENT)
-
 run-server:
-	./$(DIST_DIR)/$(BINARY_NAME_SERVER)
+	./$(DIST_DIR)/$(BINARY_NAME_SERVER) $(HOST) $(PORT)
+
+run-client:
+	./$(DIST_DIR)/$(BINARY_NAME_CLIENT) $(TARGET_HOST) $(SNI_VALUE)
 
 .PHONY: all build create-dirs build-client build-server clean run-client run-server generate-certs
