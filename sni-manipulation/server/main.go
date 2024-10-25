@@ -12,9 +12,6 @@ import (
 var certsFS embed.FS
 
 func main() {
-	http.HandleFunc("/", handleRequest)
-	fmt.Println("HTTPS Server is running on https://localhost:8443")
-
 	certPEMBytes, err := certsFS.ReadFile("certs/server.crt")
 	if err != nil {
 		log.Fatal(err)
@@ -31,16 +28,21 @@ func main() {
 
 	server := &http.Server{
 		Addr:    ":8443",
-		Handler: nil,
+		Handler: http.HandlerFunc(handleRequest),
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
+			GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+				fmt.Printf("Incoming connection - SNI: %s\n", hello.ServerName)
+				return nil, nil
+			},
 		},
 	}
 
+	fmt.Println("HTTPS Server is running on https://localhost:8443")
 	log.Fatal(server.ListenAndServeTLS("", ""))
 }
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Received request from:", r.RemoteAddr)
-	fmt.Fprintf(w, "Hello, Client! This is the secure HTTPS server speaking.")
+	fmt.Printf("Received request from: %s\n", r.RemoteAddr)
+	fmt.Fprintf(w, "Hello, %s client!", r.TLS.ServerName)
 }
