@@ -8,18 +8,18 @@ import (
 	"net/http"
 )
 
-//go:embed dist/certs/server.crt dist/certs/server.key
+//go:embed certs/server.crt certs/server.key
 var certsFS embed.FS
 
 func main() {
 	http.HandleFunc("/", handleRequest)
 	fmt.Println("HTTPS Server is running on https://localhost:8443")
 
-	certPEMBytes, err := certsFS.ReadFile("dist/certs/server.crt")
+	certPEMBytes, err := certsFS.ReadFile("certs/server.crt")
 	if err != nil {
 		log.Fatal(err)
 	}
-	keyPEMBytes, err := certsFS.ReadFile("dist/certs/server.key")
+	keyPEMBytes, err := certsFS.ReadFile("certs/server.key")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    ":8443",
-		Handler: nil, // Use the default ServeMux
+		Handler: nil,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		},
