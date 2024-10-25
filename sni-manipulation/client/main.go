@@ -7,11 +7,20 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 )
 
 func main() {
-	targetHost := "https://localhost:8443"
-	sniValue := "spoofed.com"
+	var targetHost string
+	var sniValue string
+
+	if len(os.Args) != 3 {
+		fmt.Println("Usage: ./client <target_host> <sni_value>")
+		os.Exit(1)
+	}
+
+	targetHost = os.Args[1]
+	sniValue = os.Args[2]
 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,

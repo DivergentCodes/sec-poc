@@ -44,5 +44,5 @@ func main() {
 
 func handleRequest(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Received request from: %s\n", r.RemoteAddr)
-	fmt.Fprintf(w, "Hello, %s client!", r.TLS.ServerName)
+	fmt.Fprintf(w, "Hello from (not) \"%s\"", r.TLS.ServerName)
 }
