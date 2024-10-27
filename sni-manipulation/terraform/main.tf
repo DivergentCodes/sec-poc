@@ -72,30 +72,3 @@ resource "aws_key_pair" "deployer_ed25519" {
   key_name   = "deployer-key-ed25519"
   public_key = tls_private_key.ssh_key_ed25519.public_key_openssh
 }
-
-###########################################################
-# Write scripts for SSH commands
-###########################################################
-
-resource "local_file" "ssh_nat_instance" {
-  content = <<-EOF
-#!/bin/bash
-ssh -i ${local.ssh_key_path}/id_ed25519 \
-    -o IdentitiesOnly=yes \
-    ec2-user@${aws_instance.nat_instance.public_ip}
-EOF
-  filename = "${path.module}/scripts/ssh_nat_instance.sh"
-  file_permission = "0755"
-}
-
-resource "local_file" "ssh_internal" {
-  content = <<-EOF
-#!/bin/bash
-ssh -i ${local.ssh_key_path}/id_ed25519 \
-    -o IdentitiesOnly=yes \
-    -o ProxyCommand="ssh -i ${local.ssh_key_path}/id_ed25519 -o IdentitiesOnly=yes -W %h:%p ec2-user@${aws_instance.nat_instance.public_ip}" \
-    ec2-user@${aws_instance.internal_instance.private_ip}
-EOF
-  filename = "${path.module}/scripts/ssh_internal.sh"
-  file_permission = "0755"
-}

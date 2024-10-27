@@ -77,3 +77,21 @@ resource "aws_vpc_security_group_egress_rule" "internal_private_nic_all_outbound
     Name = "${var.project_name}-internal-all-outbound"
   }
 }
+
+###########################################################
+# SSH login script to internal instance
+###########################################################
+
+resource "local_file" "ssh_internal" {
+  content = <<-EOF
+#!/bin/bash
+ssh -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ProxyCommand="ssh -i ${local.ssh_key_path}/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ec2-user@${aws_instance.nat_instance.public_ip}" \
+    ec2-user@${aws_instance.internal_instance.private_ip}
+EOF
+  filename = "${path.module}/scripts/ssh_internal.sh"
+  file_permission = "0755"
+}

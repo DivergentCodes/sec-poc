@@ -93,3 +93,20 @@ resource "aws_vpc_security_group_egress_rule" "nat_public_nic_all_outbound" {
     Name = "${var.project_name}-nat-all-outbound"
   }
 }
+
+###########################################################
+# SSH login script to NAT instance
+###########################################################
+
+resource "local_file" "ssh_nat_instance" {
+  content = <<-EOF
+#!/bin/bash
+ssh -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ec2-user@${aws_instance.nat_instance.public_ip}
+EOF
+  filename = "${path.module}/scripts/ssh_nat_instance.sh"
+  file_permission = "0755"
+}
