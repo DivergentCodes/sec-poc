@@ -23,6 +23,31 @@ resource "random_id" "instance" {
   byte_length = 8
 }
 
+###############################################################################
+# Amazon Linux 2023 AMI for NAT instance.
+###############################################################################
+
+data "aws_ami" "al2023" {
+
+  owners      = ["amazon"]
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-minimal-*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 ###########################################################
 # SSH Key Generation
 ###########################################################
@@ -60,5 +85,17 @@ ssh -i ${local.ssh_key_path}/id_ed25519 \
     ec2-user@${aws_instance.nat_instance.public_ip}
 EOF
   filename = "${path.module}/ssh_nat_instance.sh"
+  file_permission = "0755"
+}
+
+resource "local_file" "ssh_internal" {
+  content = <<-EOF
+#!/bin/bash
+ssh -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o ProxyCommand="ssh -i ${local.ssh_key_path}/id_ed25519 -o IdentitiesOnly=yes -W %h:%p ec2-user@${aws_instance.nat_instance.public_ip}" \
+    ec2-user@${aws_instance.internal_instance.private_ip}
+EOF
+  filename = "${path.module}/ssh_internal.sh"
   file_permission = "0755"
 }

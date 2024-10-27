@@ -1,29 +1,4 @@
 ###############################################################################
-# Amazon Linux 2023 AMI for NAT instance.
-###############################################################################
-
-data "aws_ami" "al2023" {
-
-  owners      = ["amazon"]
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-minimal-*"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-###############################################################################
 # NAT instance.
 ###############################################################################
 
@@ -50,7 +25,6 @@ resource "aws_instance" "nat_instance" {
   # https://docs.aws.amazon.com/vpc/latest/userguide/VPC_NAT_Instance.html#EIP_Disable_SrcDestCheck
   source_dest_check = false
 
-  # vpc_security_group_ids = [aws_security_group.nat_instance.id]
   vpc_security_group_ids = toset(flatten([
     var.additional_nat_instance_security_group_ids,
     aws_security_group.nat_instance.id,
@@ -85,7 +59,7 @@ resource "aws_security_group" "nat_instance" {
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "nat_public_nic_all_inbound_vpc" {
+resource "aws_vpc_security_group_ingress_rule" "nat_public_nic_inbound_vpc" {
   security_group_id = aws_security_group.nat_instance.id
   description       = "Allow all inbound from VPC"
 
@@ -97,15 +71,15 @@ resource "aws_vpc_security_group_ingress_rule" "nat_public_nic_all_inbound_vpc" 
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "nat_public_nic_all_inbound_admin" {
+resource "aws_vpc_security_group_ingress_rule" "nat_public_nic_inbound_admin" {
   security_group_id = aws_security_group.nat_instance.id
-  description       = "Allow all inbound from VPC"
+  description       = "Allow all inbound from admin IP"
 
   cidr_ipv4   = var.admin_ip
   ip_protocol = "-1"
 
   tags = {
-    Name = "${var.project_name}-nat-all-inbound-vpc"
+    Name = "${var.project_name}-nat-all-inbound-admin"
   }
 }
 
