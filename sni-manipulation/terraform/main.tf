@@ -3,15 +3,9 @@
 ###########################################################
 
 locals {
+  script_path  = "${path.module}/scripts"
   ssh_key_path = "${path.module}/ssh"
-  ubuntu24_amd_ami = {
-    # https://cloud-images.ubuntu.com/locator/ec2/
-    us-east-1 = "ami-0cad6ee50670e3d0e"
-    us-east-2 = "ami-0c995fbcf99222492"
-    us-west-1 = "ami-0a1d34394ed12ff2a"
-    us-west-2 = "ami-01a8b7cc84780badb"
-  }
-  ami_id = local.ubuntu24_amd_ami[var.region]
+  ami_user     = "ec2-user"
 }
 
 resource "random_id" "instance" {
