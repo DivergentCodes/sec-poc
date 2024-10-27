@@ -67,6 +67,9 @@ ssh -v -i ./ssh/id_ed25519 \
     ubuntu@<private-instance-private-ip>
 ```
 
+<img width="762" alt="sni-manipulation" src="https://github.com/user-attachments/assets/0357bc80-a965-4dd2-855a-d98e6a8975fa">
+
+
 ## Commands
 
 On the filtering host, watch passing SNI fields using `tcpdump`.
