@@ -13,7 +13,7 @@
 function configure_squid_web_filtering {
 
     # Install packages.
-    yum install -y squid
+    yum install -y squid tcpdump
 
     # Domain Whitelist. Newline separated string of domains.
     echo -e '${allowed_egress_web_domains}' > /etc/squid/whitelist.txt
