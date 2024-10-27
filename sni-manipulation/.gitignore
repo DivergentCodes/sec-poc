@@ -48,3 +48,6 @@ terraform.rc
 
 # SSH
 ssh/
+
+.*.un~
+scripts/

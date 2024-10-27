@@ -84,7 +84,7 @@ ssh -i ${local.ssh_key_path}/id_ed25519 \
     -o IdentitiesOnly=yes \
     ec2-user@${aws_instance.nat_instance.public_ip}
 EOF
-  filename = "${path.module}/ssh_nat_instance.sh"
+  filename = "${path.module}/scripts/ssh_nat_instance.sh"
   file_permission = "0755"
 }
 
@@ -96,6 +96,6 @@ ssh -i ${local.ssh_key_path}/id_ed25519 \
     -o ProxyCommand="ssh -i ${local.ssh_key_path}/id_ed25519 -o IdentitiesOnly=yes -W %h:%p ec2-user@${aws_instance.nat_instance.public_ip}" \
     ec2-user@${aws_instance.internal_instance.private_ip}
 EOF
-  filename = "${path.module}/ssh_internal.sh"
+  filename = "${path.module}/scripts/ssh_internal.sh"
   file_permission = "0755"
 }
