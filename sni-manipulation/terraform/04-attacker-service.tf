@@ -9,6 +9,15 @@ resource "aws_instance" "attacker_service" {
   key_name      = aws_key_pair.deployer_ed25519.key_name
   subnet_id     = aws_subnet.public.id
 
+  # Find user-data.txt after boot:
+  #   sudo cat /var/lib/cloud/instances/*/user-data.txt
+  user_data = templatefile(
+    "${local.script_path}/user_data_attacker_service_centos.sh",
+    {
+      allowed_egress_web_domains  = join("\n", var.allowed_egress_web_domains)
+    }
+  )
+
   user_data_replace_on_change = true
 
   vpc_security_group_ids = [aws_security_group.attacker_service.id]
@@ -84,15 +93,29 @@ resource "aws_vpc_security_group_egress_rule" "attacker_private_nic_all_outbound
 # SSH login script to attacker instance
 ###########################################################
 
-resource "local_file" "ssh_attacker_instance" {
+resource "local_file" "attacker_login" {
   content = <<-EOF
 #!/bin/bash
 ssh -i ${local.ssh_key_path}/id_ed25519 \
     -o IdentitiesOnly=yes \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
-    ec2-user@${aws_instance.attacker_service.public_ip}
+    ${local.ami_user}@${aws_instance.attacker_service.public_ip}
 EOF
-  filename = "${path.module}/scripts/ssh_attacker_instance.sh"
+  filename = "${local.script_path}/attacker-login.sh"
+  file_permission = "0755"
+}
+
+resource "local_file" "service_upload" {
+  content = <<-EOF
+#!/bin/bash
+scp -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ../dist/server-linux-amd64 \
+    ${local.ami_user}@${aws_instance.attacker_service.public_ip}:/home/${local.ami_user}/server
+EOF
+  filename = "${local.script_path}/attacker-service-upload.sh"
   file_permission = "0755"
 }
