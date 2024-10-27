@@ -31,3 +31,20 @@ go.work
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# SSH
+ssh/
