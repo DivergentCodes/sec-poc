@@ -31,9 +31,11 @@ generate-certs:
 
 build-client:
 	cd client && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_CLIENT) main.go
+	cd client && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_CLIENT)-linux-amd64 main.go
 
 build-server:
 	cd server && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_SERVER) main.go
+	cd server && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_SERVER)-linux-amd64 main.go
 
 clean:
 	$(GOCLEAN)
