@@ -51,12 +51,6 @@ variable "additional_nat_instance_security_group_ids" {
   default     = []
 }
 
-variable "enable_egress_web_filtering" {
-  description = "Enable HTTP web filtering via Squid proxy (NAT Instance only)."
-  type        = bool
-  default     = false
-}
-
 variable "allowed_egress_web_domains" {
   description = "Domains that are allowed through HTTP(S) filtering."
   type        = list(string)

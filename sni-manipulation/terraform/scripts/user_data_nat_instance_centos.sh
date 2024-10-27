@@ -6,9 +6,6 @@
 # Tested on rpm/systemd based Linux.
 
 
-INTERNAL_IFACE="enX0"
-
-
 ############################################################
 # Squid Proxy
 ############################################################
@@ -93,7 +90,7 @@ function configure_nat {
     sysctl -w net.ipv4.ip_forward=1
 
     # Configure firewall NAT rule.
-    /sbin/iptables -t nat -A POSTROUTING -o "$INTERNAL_IFACE" -j MASQUERADE
+    /sbin/iptables -t nat -A POSTROUTING -o "$(ip route | grep default | awk '{print $5}')" -j MASQUERADE
 }
 
 
@@ -106,9 +103,7 @@ yum install -y vim tmux iptables-services
 
 configure_nat;
 
-if [[ '${enable_egress_web_filtering}' ]]; then
-    configure_squid_web_filtering;
-fi
+configure_squid_web_filtering;
 
 # Save firewall configuration.
 service iptables save

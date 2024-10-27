@@ -14,7 +14,6 @@ resource "aws_instance" "nat_instance" {
   user_data = templatefile(
     "${path.module}/scripts/user_data_nat_instance_centos.sh",
     {
-      enable_egress_web_filtering = var.enable_egress_web_filtering == true ? "true" : "",
       allowed_egress_web_domains  = join("\n", var.allowed_egress_web_domains)
     }
   )
