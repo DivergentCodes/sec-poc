@@ -1,7 +1,7 @@
 variable "project_name" {
   description = "The slug name of the project"
   type        = string
-  default     = "sni-manipulation-poc"
+  default     = "sni-manipulation-squid-poc"
 }
 
 variable "region" {
