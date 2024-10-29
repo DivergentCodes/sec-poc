@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -73,19 +74,8 @@ func main() {
 			continue
 		}
 
-		// Prepare command execution based on shell type
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/c", command)
-		} else {
-			cmd = exec.Command("/bin/sh", "-c", command)
-		}
-
-		// Set the working directory for the command
-		cmd.Dir = cwd
-
 		// Execute with full pipe handling
-		output, err := executeCommand(cmd)
+		output, err := executeCommand(command, cwd)
 		if err != nil {
 			output = []byte(fmt.Sprintf("Error executing command: %s\n%s", err, output))
 		}
@@ -102,7 +92,33 @@ func main() {
 	}
 }
 
-func executeCommand(cmd *exec.Cmd) ([]byte, error) {
+func executeCommand(command string, cwd string) ([]byte, error) {
+	// Prepare command execution based on shell type
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("/bin/sh", "-c", command)
+	}
+
+	// Set the working directory for the command
+	cmd.Dir = cwd
+
+	// Handle cd command separately
+	if strings.HasPrefix(command, "cd ") {
+		dir := strings.TrimPrefix(command, "cd ")
+		err := os.Chdir(dir)
+		if err != nil {
+			return []byte(err.Error()), err
+		}
+		// Get and return new working directory
+		pwd, err := os.Getwd()
+		if err != nil {
+			return []byte(err.Error()), err
+		}
+		return []byte("Changed directory to: " + pwd + "\n"), nil
+	}
+
 	// Create pipes for both stdout and stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
