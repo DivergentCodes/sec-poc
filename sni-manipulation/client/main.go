@@ -11,16 +11,18 @@ import (
 )
 
 func main() {
-	var targetHost string
+	var targetIP string
+	var targetPort string
 	var sniValue string
 
-	if len(os.Args) != 3 {
-		fmt.Println("Usage: ./client <target_host> <sni_value>")
+	if len(os.Args) != 4 {
+		fmt.Println("Usage: ./client <target_ip> <target_port> <sni_value>")
 		os.Exit(1)
 	}
 
-	targetHost = os.Args[1]
-	sniValue = os.Args[2]
+	targetIP = os.Args[1]
+	targetPort = os.Args[2]
+	sniValue = os.Args[3]
 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
@@ -46,7 +48,7 @@ func main() {
 				conn.Close()
 				return nil, err
 			}
-			fmt.Printf("Sending request...\n\tHost: %s\n\tSNI:  %s\n", targetHost, tlsConn.ConnectionState().ServerName)
+			fmt.Printf("Sending request...\n\tIP: %s\n\tSNI:  %s\n", targetIP, tlsConn.ConnectionState().ServerName)
 			return conn, nil
 		},
 	}
@@ -55,7 +57,7 @@ func main() {
 	client := &http.Client{Transport: transport}
 
 	// Make the HTTPS request
-	resp, err := client.Get(targetHost)
+	resp, err := client.Get(fmt.Sprintf("https://%s:%s", targetIP, targetPort))
 	if err != nil {
 		log.Fatal("Error making request:", err)
 	}

