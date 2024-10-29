@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -69,9 +70,15 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		// Read command from server input
 		var command string
 		fmt.Print("Enter command: ")
-		fmt.Scanln(&command)
+		reader := bufio.NewReader(os.Stdin)
+		command, err = reader.ReadString('\n')
+		if err != nil {
+			log.Println("Error reading command:", err)
+			break
+		}
 
 		// Send command to client
+		fmt.Printf("Sending command: %s\n", command)
 		err = conn.WriteMessage(websocket.TextMessage, []byte(command))
 		if err != nil {
 			log.Println("Error sending command:", err)

