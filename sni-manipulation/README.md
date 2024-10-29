@@ -26,7 +26,7 @@ This opens domain filtering by SNI inspection up to spoofing attacks (SNI manipu
 
 Clone the repository and build the project.
 
-```
+```sh
 git clone https://github.com/DivergentCodes/sec-poc
 cd sni-manipulation
 make build
@@ -34,7 +34,7 @@ make build
 
 Start the service and then run the client.
 
-```
+```sh
 go run client.go
 go run server.go
 ```
@@ -43,7 +43,7 @@ go run server.go
 
 Deploy the environment with Terraform.
 
-```
+```sh
 cd terraform
 export AWS_PROFILE="<your-profile>"
 terraform init
@@ -52,7 +52,7 @@ terraform apply
 
 Connect to the NAT instance.
 
-```
+```sh
 ssh -i ./ssh/id_ed25519 \
     -o IdentitiesOnly=yes \
     ubuntu@<NAT-instance-public-ip>
@@ -60,7 +60,7 @@ ssh -i ./ssh/id_ed25519 \
 
 Connect to the private instance by using the NAT instance as a jump host.
 
-```
+```sh
 ssh -v -i ./ssh/id_ed25519 \
     -o IdentitiesOnly=yes \
     -o ProxyCommand="ssh -i ./ssh/id_ed25519 -o IdentitiesOnly=yes -W %h:%p ubuntu@<NAT-instance-public-ip>" \
