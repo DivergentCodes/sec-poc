@@ -88,9 +88,8 @@ On the internal host, have the client connect to the attacker server,
 forging the SNI value.
 
 ```sh
-./client https://3.87.129.194 ubuntu.com
+./client 3.87.129.194 443 ubuntu.com
 ```
-
 
 ## Ethical Considerations
 

