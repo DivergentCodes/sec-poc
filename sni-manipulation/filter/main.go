@@ -121,15 +121,12 @@ func handleConnection(clientConn net.Conn) {
 	if err != nil {
 		log.Printf("Failed to parse ClientHello: %v", err)
 	} else if clientHello != nil {
-		log.Printf("Connection from %s to %s - SNI: %s",
+		log.Printf(
+			"TLS connection from %s to %s - SNI: %s",
 			clientConn.RemoteAddr(),
 			origDst,
-			clientHello.ServerName)
-
-		// You can also access other ClientHello information:
-		log.Printf("TLS Version: %#x", clientHello.Conn.(*fakeConn).ConnectionState().Version)
-		log.Printf("Cipher Suites: %v", clientHello.CipherSuites)
-		log.Printf("Supported Versions: %v", clientHello.SupportedVersions)
+			clientHello.ServerName,
+		)
 	}
 
 	// Forward the handshake
