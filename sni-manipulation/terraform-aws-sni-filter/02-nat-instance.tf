@@ -119,6 +119,13 @@ scp -i ${local.ssh_key_path}/id_ed25519 \
     -o UserKnownHostsFile=/dev/null \
     ../dist/filter-linux-amd64 \
     ${local.ami_user}@${aws_instance.nat_instance.public_ip}:/home/${local.ami_user}/filter
+
+scp -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ../filter/domains.txt \
+    ${local.ami_user}@${aws_instance.nat_instance.public_ip}:/home/${local.ami_user}/domains.txt
 EOF
   filename = "${local.script_path}/nat-filter-upload.sh"
   file_permission = "0755"
