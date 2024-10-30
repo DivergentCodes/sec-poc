@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -13,7 +15,7 @@ import (
 const (
 	TLSRecordHeaderLength = 5
 	MaxTLSRecordLength    = 16384 + 2048
-	SO_ORIGINAL_DST       = 80 // Linux socket option to get original destination
+	SO_ORIGINAL_DST       = 80
 )
 
 func main() {
@@ -70,17 +72,14 @@ func getOriginalDst(conn net.Conn) (string, error) {
 func handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	// Get the original destination from the redirected connection
+	// Get original destination
 	origDst, err := getOriginalDst(clientConn)
 	if err != nil {
 		log.Printf("Failed to get original destination: %v", err)
 		return
 	}
 
-	// Log the connection details
-	log.Printf("Connection from %s to %s", clientConn.RemoteAddr(), origDst)
-
-	// Connect to the original destination
+	// Connect to original destination
 	serverConn, err := net.Dial("tcp", origDst)
 	if err != nil {
 		log.Printf("Failed to connect to original destination %s: %v", origDst, err)
@@ -88,135 +87,176 @@ func handleConnection(clientConn net.Conn) {
 	}
 	defer serverConn.Close()
 
-	// Buffer for TLS record header
-	headerBuf := make([]byte, TLSRecordHeaderLength)
-
-	// Read the TLS record header
-	_, err = io.ReadFull(clientConn, headerBuf)
-	if err != nil {
+	// Read TLS record header
+	header := make([]byte, TLSRecordHeaderLength)
+	if _, err := io.ReadFull(clientConn, header); err != nil {
 		log.Printf("Failed to read TLS header: %v", err)
 		return
 	}
 
-	// Verify it's a TLS handshake
-	if headerBuf[0] != 0x16 {
-		log.Printf("Not a TLS handshake from %s", clientConn.RemoteAddr())
+	// Verify TLS handshake
+	if header[0] != 0x16 { // TLS Handshake
+		log.Printf("Not a TLS handshake")
+		serverConn.Write(header)
+		proxy(clientConn, serverConn)
 		return
 	}
 
-	// Get handshake message length
-	recordLength := int(binary.BigEndian.Uint16(headerBuf[3:5]))
-	if recordLength > MaxTLSRecordLength {
-		log.Printf("TLS record too large from %s: %d", clientConn.RemoteAddr(), recordLength)
+	// Get record length
+	recordLen := uint16(header[3])<<8 | uint16(header[4])
+	if recordLen > MaxTLSRecordLength {
+		log.Printf("TLS record too large: %d", recordLen)
 		return
 	}
 
-	// Read the handshake message
-	handshakeBuf := make([]byte, recordLength)
-	_, err = io.ReadFull(clientConn, handshakeBuf)
+	// Read the full handshake
+	record := make([]byte, recordLen)
+	if _, err := io.ReadFull(clientConn, record); err != nil {
+		log.Printf("Failed to read handshake record: %v", err)
+		return
+	}
+
+	// Parse ClientHello using crypto/tls
+	clientHello, err := parseClientHello(record)
 	if err != nil {
-		log.Printf("Failed to read handshake: %v", err)
-		return
-	}
-
-	// Extract and log SNI
-	sni := extractSNI(handshakeBuf)
-	if sni != "" {
+		log.Printf("Failed to parse ClientHello: %v", err)
+	} else if clientHello != nil {
 		log.Printf("Connection from %s to %s - SNI: %s",
 			clientConn.RemoteAddr(),
 			origDst,
-			sni)
+			clientHello.ServerName)
+
+		// You can also access other ClientHello information:
+		log.Printf("TLS Version: %#x", clientHello.Conn.(*fakeConn).ConnectionState().Version)
+		log.Printf("Cipher Suites: %v", clientHello.CipherSuites)
+		log.Printf("Supported Versions: %v", clientHello.SupportedVersions)
 	}
 
-	// Forward the initial TLS handshake
-	serverConn.Write(headerBuf)
-	serverConn.Write(handshakeBuf)
+	// Forward the handshake
+	serverConn.Write(header)
+	serverConn.Write(record)
 
-	// Start bidirectional forwarding
-	go io.Copy(serverConn, clientConn)
-	io.Copy(clientConn, serverConn)
+	// Continue proxying
+	proxy(clientConn, serverConn)
 }
 
-func extractSNI(data []byte) string {
-	if len(data) < 2 {
-		return ""
+func parseClientHello(record []byte) (*tls.ClientHelloInfo, error) {
+	hello := &tls.ClientHelloInfo{
+		Conn: &fakeConn{},
 	}
 
-	// Skip handshake type and length
-	pos := 2
-
-	// Skip protocol version
-	pos += 2
-
-	// Skip random
-	pos += 32
-
-	// Skip session ID
-	if pos+1 > len(data) {
-		return ""
+	// Skip handshake header (1 byte type + 3 bytes length)
+	if len(record) < 4 {
+		return nil, fmt.Errorf("record too short")
 	}
-	sessionIDLength := int(data[pos])
-	pos += 1 + sessionIDLength
+	reader := bytes.NewReader(record[4:])
+
+	// Skip client version
+	if _, err := reader.Seek(2, io.SeekCurrent); err != nil {
+		return nil, err
+	}
+
+	// Skip random (32 bytes)
+	if _, err := reader.Seek(32, io.SeekCurrent); err != nil {
+		return nil, err
+	}
+
+	// Skip session id
+	sessionIDLen, err := reader.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := reader.Seek(int64(sessionIDLen), io.SeekCurrent); err != nil {
+		return nil, err
+	}
 
 	// Skip cipher suites
-	if pos+2 > len(data) {
-		return ""
+	var cipherSuitesLen uint16
+	if err := binary.Read(reader, binary.BigEndian, &cipherSuitesLen); err != nil {
+		return nil, err
 	}
-	cipherSuitesLength := int(binary.BigEndian.Uint16(data[pos : pos+2]))
-	pos += 2 + cipherSuitesLength
+	if _, err := reader.Seek(int64(cipherSuitesLen), io.SeekCurrent); err != nil {
+		return nil, err
+	}
 
 	// Skip compression methods
-	if pos+1 > len(data) {
-		return ""
+	compressionMethodsLen, err := reader.ReadByte()
+	if err != nil {
+		return nil, err
 	}
-	compressionMethodsLength := int(data[pos])
-	pos += 1 + compressionMethodsLength
+	if _, err := reader.Seek(int64(compressionMethodsLen), io.SeekCurrent); err != nil {
+		return nil, err
+	}
 
-	// Check for extensions
-	if pos+2 > len(data) {
-		return ""
+	// Read extensions length
+	var extensionsLen uint16
+	if err := binary.Read(reader, binary.BigEndian, &extensionsLen); err != nil {
+		return nil, err
 	}
-	extensionsLength := int(binary.BigEndian.Uint16(data[pos : pos+2]))
-	pos += 2
 
 	// Parse extensions
-	end := pos + extensionsLength
-	for pos+4 <= end {
-		extensionType := binary.BigEndian.Uint16(data[pos : pos+2])
-		extensionLength := int(binary.BigEndian.Uint16(data[pos+2 : pos+4]))
-		pos += 4
-
-		if extensionType == 0 { // Server Name Indication extension
-			if pos+2 > len(data) {
-				return ""
-			}
-
-			// Skip server name list length
-			pos += 2
-
-			if pos+1 > len(data) {
-				return ""
-			}
-
-			// Skip name type
-			pos += 1
-
-			if pos+2 > len(data) {
-				return ""
-			}
-
-			nameLength := int(binary.BigEndian.Uint16(data[pos : pos+2]))
-			pos += 2
-
-			if pos+nameLength > len(data) {
-				return ""
-			}
-
-			return string(data[pos : pos+nameLength])
-		}
-
-		pos += extensionLength
+	extensionsData := make([]byte, extensionsLen)
+	if _, err := io.ReadFull(reader, extensionsData); err != nil {
+		return nil, err
 	}
 
-	return ""
+	// Find SNI extension
+	extReader := bytes.NewReader(extensionsData)
+	for extReader.Len() > 0 {
+		var extType, extLen uint16
+		if err := binary.Read(extReader, binary.BigEndian, &extType); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(extReader, binary.BigEndian, &extLen); err != nil {
+			return nil, err
+		}
+
+		if extType == 0 { // SNI extension
+			// Skip list length
+			if _, err := extReader.Seek(2, io.SeekCurrent); err != nil {
+				return nil, err
+			}
+			// Skip name type
+			if _, err := extReader.Seek(1, io.SeekCurrent); err != nil {
+				return nil, err
+			}
+			// Read server name length
+			var nameLen uint16
+			if err := binary.Read(extReader, binary.BigEndian, &nameLen); err != nil {
+				return nil, err
+			}
+			serverName := make([]byte, nameLen)
+			if _, err := io.ReadFull(extReader, serverName); err != nil {
+				return nil, err
+			}
+			hello.ServerName = string(serverName)
+			break
+		}
+
+		if _, err := extReader.Seek(int64(extLen), io.SeekCurrent); err != nil {
+			return nil, err
+		}
+	}
+
+	return hello, nil
+}
+
+// fakeConn implements the minimal net.Conn interface needed for ClientHelloInfo
+type fakeConn struct {
+	net.Conn
+}
+
+func (c *fakeConn) ConnectionState() tls.ConnectionState {
+	return tls.ConnectionState{}
+}
+
+func proxy(client, server net.Conn) {
+	done := make(chan bool, 2)
+	copy := func(dst, src net.Conn) {
+		io.Copy(dst, src)
+		done <- true
+	}
+	go copy(server, client)
+	go copy(client, server)
+	<-done
 }
