@@ -1,3 +1,24 @@
+/*
+This is a TLS SNI filter that blocks or allows connections based on the SNI value.
+
+Usage:
+
+	./filter --domain-file <path> --default <allow|deny> [--port <port>]
+
+It is designed to be used as a reverse proxy for TLS connections, listening on a
+local port and forwarding to the original destination.
+
+An iptables rules can be used to redirect the traffic to the local port.
+
+	# Enable IP forwarding.
+	sysctl -w net.ipv4.ip_forward=1
+
+	# Configure firewall NAT rule.
+	/sbin/iptables -t nat -A POSTROUTING -o "$(ip route | grep default | awk '{print $5}')" -j MASQUERADE
+
+	# Configure firewall transparent proxying rules.
+	/sbin/iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 3130;
+*/
 package main
 
 import (
@@ -15,10 +36,41 @@ import (
 	"syscall"
 )
 
+// TLSErrorCode represents a TLS alert code value
+type TLSErrorCode byte
+
 const (
+	// TLS Record Header Length
 	TLSRecordHeaderLength = 5
 	MaxTLSRecordLength    = 16384 + 2048
 	SO_ORIGINAL_DST       = 80
+
+	// TLS Alert Codes
+	TLSCloseNotify            TLSErrorCode = 0
+	TLSUnexpectedMessage      TLSErrorCode = 10
+	TLSBadRecordMAC           TLSErrorCode = 20
+	TLSDecryptionFailed       TLSErrorCode = 21 // deprecated
+	TLSRecordOverflow         TLSErrorCode = 22
+	TLSDecompressionFailure   TLSErrorCode = 30
+	TLSHandshakeFailure       TLSErrorCode = 40
+	TLSNoCertificate          TLSErrorCode = 41 // SSL3.0
+	TLSBadCertificate         TLSErrorCode = 42
+	TLSUnsupportedCertificate TLSErrorCode = 43
+	TLSCertificateRevoked     TLSErrorCode = 44
+	TLSCertificateExpired     TLSErrorCode = 45
+	TLSCertificateUnknown     TLSErrorCode = 46
+	TLSIllegalParameter       TLSErrorCode = 47
+	TLSUnknownCA              TLSErrorCode = 48
+	TLSAccessDenied           TLSErrorCode = 49
+	TLSDecodeError            TLSErrorCode = 50
+	TLSDecryptError           TLSErrorCode = 51
+	TLSExportRestriction      TLSErrorCode = 60
+	TLSProtocolVersion        TLSErrorCode = 70
+	TLSInsufficientSecurity   TLSErrorCode = 71
+	TLSInternalError          TLSErrorCode = 80
+	TLSUserCanceled           TLSErrorCode = 90
+	TLSNoRenegotiation        TLSErrorCode = 100
+	TLSUnsupportedExtension   TLSErrorCode = 110
 )
 
 var (
@@ -156,13 +208,23 @@ func handleConnection(clientConn net.Conn) {
 		// Default deny
 		if clientHello == nil || clientHello.ServerName == "" {
 			logTLSConnection(clientConn, origDst, "", "Blocked", 0)
+			rejectTLSConnection(clientConn, TLSAccessDenied)
+			return
 		} else {
 			_, exists := domainList[clientHello.ServerName]
 			if exists {
 				domainList[clientHello.ServerName]++
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Allowed", domainList[clientHello.ServerName])
+				logTLSConnection(
+					clientConn,
+					origDst,
+					clientHello.ServerName,
+					"Allowed",
+					domainList[clientHello.ServerName],
+				)
 			} else {
 				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Blocked", 0)
+				rejectTLSConnection(clientConn, TLSAccessDenied)
+				return
 			}
 		}
 	} else {
@@ -173,7 +235,15 @@ func handleConnection(clientConn net.Conn) {
 			_, exists := domainList[clientHello.ServerName]
 			if exists {
 				domainList[clientHello.ServerName]++
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Blocked", domainList[clientHello.ServerName])
+				logTLSConnection(
+					clientConn,
+					origDst,
+					clientHello.ServerName,
+					"Blocked",
+					domainList[clientHello.ServerName],
+				)
+				rejectTLSConnection(clientConn, TLSAccessDenied)
+				return
 			} else {
 				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Allowed", 0)
 			}
@@ -348,4 +418,16 @@ func logTLSConnection(src net.Conn, dst string, sni string, action string, count
 	}
 
 	log.Print(format)
+}
+
+func rejectTLSConnection(clientConn net.Conn, tlsErrorCode TLSErrorCode) {
+	alert := []byte{
+		0x15,       // Alert protocol
+		0x03, 0x03, // TLS version 1.2
+		0x00, 0x02, // Length
+		0x02, // Fatal alert
+		byte(tlsErrorCode),
+	}
+	clientConn.Write(alert)
+	clientConn.Close()
 }
