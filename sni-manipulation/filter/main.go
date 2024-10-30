@@ -45,6 +45,9 @@ const (
 	MaxTLSRecordLength    = 16384 + 2048
 	SO_ORIGINAL_DST       = 80
 
+	ActionAllowed = "Allowed"
+	ActionBlocked = "Blocked"
+
 	// TLS Alert Codes
 	TLSCloseNotify            TLSErrorCode = 0
 	TLSUnexpectedMessage      TLSErrorCode = 10
@@ -204,49 +207,53 @@ func handleConnection(clientConn net.Conn) {
 		log.Printf("Failed to parse ClientHello: %v", err)
 	}
 
+	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
+
 	if defaultDeny {
-		// Default deny
-		if clientHello == nil || clientHello.ServerName == "" {
-			logTLSConnection(clientConn, origDst, "", "Blocked", 0)
+		if !isEmptySNI {
+			count, matched := isDomainInList(clientHello.ServerName)
+			if matched {
+				// Allow
+				logTLSConnection(
+					clientConn,
+					origDst,
+					clientHello.ServerName,
+					ActionAllowed,
+					count,
+				)
+			} else {
+				// Block
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count)
+				rejectTLSConnection(clientConn, TLSAccessDenied)
+				return
+			}
+		} else {
+			// Block
+			logTLSConnection(clientConn, origDst, "", ActionBlocked, 0)
 			rejectTLSConnection(clientConn, TLSAccessDenied)
 			return
-		} else {
-			_, exists := domainList[clientHello.ServerName]
-			if exists {
-				domainList[clientHello.ServerName]++
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					"Allowed",
-					domainList[clientHello.ServerName],
-				)
-			} else {
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Blocked", 0)
-				rejectTLSConnection(clientConn, TLSAccessDenied)
-				return
-			}
 		}
 	} else {
-		// Default allow
-		if clientHello == nil || clientHello.ServerName == "" {
-			logTLSConnection(clientConn, origDst, "", "Allowed", 0)
-		} else {
-			_, exists := domainList[clientHello.ServerName]
-			if exists {
-				domainList[clientHello.ServerName]++
+		if !isEmptySNI {
+			count, matched := isDomainInList(clientHello.ServerName)
+			if matched {
+				// Block
 				logTLSConnection(
 					clientConn,
 					origDst,
 					clientHello.ServerName,
-					"Blocked",
-					domainList[clientHello.ServerName],
+					ActionBlocked,
+					count,
 				)
 				rejectTLSConnection(clientConn, TLSAccessDenied)
 				return
 			} else {
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Allowed", 0)
+				// Allow
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count)
 			}
+		} else {
+			// Allow
+			logTLSConnection(clientConn, origDst, "", ActionAllowed, 0)
 		}
 	}
 
@@ -430,4 +437,27 @@ func rejectTLSConnection(clientConn net.Conn, tlsErrorCode TLSErrorCode) {
 	}
 	clientConn.Write(alert)
 	clientConn.Close()
+}
+
+func isSubdomainMatch(domain, pattern string) bool {
+	// If pattern starts with ".", it's a wildcard subdomain match
+	if strings.HasPrefix(pattern, ".") {
+		// Remove the leading dot for comparison
+		pattern = pattern[1:]
+		// Domain must be longer than pattern (to have subdomain)
+		// and must end with the pattern
+		return len(domain) > len(pattern) && strings.HasSuffix(domain, pattern)
+	}
+	// Otherwise, exact match only
+	return domain == pattern
+}
+
+func isDomainInList(domain string) (int, bool) {
+	for pattern := range domainList {
+		if isSubdomainMatch(domain, pattern) {
+			domainList[pattern]++ // Increment counter for the matching pattern
+			return domainList[pattern], true
+		}
+	}
+	return 0, false
 }
