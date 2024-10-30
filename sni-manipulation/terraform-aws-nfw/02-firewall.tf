@@ -14,7 +14,7 @@ resource "aws_networkfirewall_rule_group" "domain_filtering" {
 
     rules_source {
       rules_source_list {
-        generated_rules_type = "ALLOWLIST"
+        generated_rules_type = "DENYLIST"
         target_types        = ["HTTP_HOST", "TLS_SNI"]
         targets             = var.allowed_egress_web_domains
       }
@@ -36,7 +36,7 @@ resource "aws_networkfirewall_firewall_policy" "main" {
   firewall_policy {
     stateless_default_actions          = ["aws:forward_to_sfe"]
     stateless_fragment_default_actions = ["aws:forward_to_sfe"]
-    stateful_default_actions           = ["aws:drop_established"]
+    stateful_default_actions           = []
 
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.domain_filtering.arn
@@ -45,7 +45,7 @@ resource "aws_networkfirewall_firewall_policy" "main" {
 
     stateful_engine_options {
       rule_order              = "STRICT_ORDER"
-      stream_exception_policy = "DROP"
+      stream_exception_policy = "REJECT"
     }
   }
 
