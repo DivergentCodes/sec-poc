@@ -150,39 +150,32 @@ func handleConnection(clientConn net.Conn) {
 	clientHello, err := parseClientHello(record)
 	if err != nil {
 		log.Printf("Failed to parse ClientHello: %v", err)
-	} else if clientHello != nil {
-		log.Printf(
-			"TLS connection from %s to %s - SNI: %s",
-			clientConn.RemoteAddr(),
-			origDst,
-			clientHello.ServerName,
-		)
 	}
 
 	if defaultDeny {
 		// Default deny
 		if clientHello == nil || clientHello.ServerName == "" {
-			log.Printf("Blocked: no SNI")
+			logTLSConnection(clientConn, origDst, "", "Blocked", 0)
 		} else {
 			_, exists := domainList[clientHello.ServerName]
 			if exists {
 				domainList[clientHello.ServerName]++
-				log.Printf("Allowed: %s (count: %d)", clientHello.ServerName, domainList[clientHello.ServerName])
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Allowed", domainList[clientHello.ServerName])
 			} else {
-				log.Printf("Blocked: %s", clientHello.ServerName)
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Blocked", 0)
 			}
 		}
 	} else {
 		// Default allow
 		if clientHello == nil || clientHello.ServerName == "" {
-			log.Printf("Allowed: no SNI")
+			logTLSConnection(clientConn, origDst, "", "Allowed", 0)
 		} else {
 			_, exists := domainList[clientHello.ServerName]
 			if exists {
 				domainList[clientHello.ServerName]++
-				log.Printf("Blocked: %s (count: %d)", clientHello.ServerName, domainList[clientHello.ServerName])
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Blocked", domainList[clientHello.ServerName])
 			} else {
-				log.Printf("Allowed: %s", clientHello.ServerName)
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, "Allowed", 0)
 			}
 		}
 	}
@@ -339,4 +332,20 @@ func loadDomainList(filename string) error {
 	}
 
 	return scanner.Err()
+}
+
+func logTLSConnection(src net.Conn, dst string, sni string, action string, count int) {
+	format := fmt.Sprintf(
+		"%s SNI [%s] TLS connection from [%s] to [%s]",
+		action,
+		sni,
+		src.RemoteAddr(),
+		dst,
+	)
+
+	if count > 0 {
+		format += fmt.Sprintf(" (%d)", count)
+	}
+
+	log.Print(format)
 }
