@@ -42,6 +42,11 @@ import (
 // TLSErrorCode represents a TLS alert code value
 type TLSErrorCode byte
 
+// fakeConn implements the minimal net.Conn interface needed for ClientHelloInfo
+type fakeConn struct {
+	net.Conn
+}
+
 const (
 	// TLS Record Header Length
 	TLSRecordHeaderLength = 5
@@ -85,6 +90,7 @@ var (
 	defaultDeny bool
 )
 
+// Main entry point.
 func main() {
 	listenPort := flag.String("port", "3130", "Local port to listen on")
 	domainFile := flag.String("domain-file", "", "File containing domain rules (one domain per line)")
@@ -130,6 +136,58 @@ func main() {
 	}
 }
 
+// Load domain list from file.
+func loadDomainList(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		domain := strings.TrimSpace(scanner.Text())
+		if domain == "" || strings.HasPrefix(domain, "#") {
+			continue
+		}
+
+		domainList[domain] = 0
+		if defaultDeny {
+			log.Printf("Allowing domain: %s", domain)
+		} else {
+			log.Printf("Blocking domain: %s", domain)
+		}
+	}
+
+	return scanner.Err()
+}
+
+// Check if a domain is in the list.
+func isDomainInList(domain string) (int, bool) {
+	for pattern := range domainList {
+		if isSubdomainMatch(domain, pattern) {
+			domainList[pattern]++ // Increment counter for the matching pattern
+			return domainList[pattern], true
+		}
+	}
+	return 0, false
+}
+
+// Check if a domain matches a pattern (wildcard subdomain match).
+func isSubdomainMatch(domain, pattern string) bool {
+	// If pattern starts with ".", it's a wildcard subdomain match
+	if strings.HasPrefix(pattern, ".") {
+		// Remove the leading dot for comparison
+		pattern = pattern[1:]
+		// Domain must be longer than pattern (to have subdomain)
+		// and must end with the pattern
+		return len(domain) > len(pattern) && strings.HasSuffix(domain, pattern)
+	}
+	// Otherwise, exact match only
+	return domain == pattern
+}
+
+// Get the original destination from the connection.
 func getOriginalDst(conn net.Conn) (string, error) {
 	// Get the underlying TCP connection
 	tcpConn, ok := conn.(*net.TCPConn)
@@ -158,117 +216,7 @@ func getOriginalDst(conn net.Conn) (string, error) {
 	return fmt.Sprintf("%s:%d", dstIP.String(), dstPort), nil
 }
 
-func handleConnection(clientConn net.Conn) {
-	defer clientConn.Close()
-
-	// Get original destination
-	origDst, err := getOriginalDst(clientConn)
-	if err != nil {
-		log.Printf("Failed to get original destination: %v", err)
-		return
-	}
-
-	// Connect to original destination
-	serverConn, err := net.Dial("tcp", origDst)
-	if err != nil {
-		log.Printf("Failed to connect to original destination %s: %v", origDst, err)
-		return
-	}
-	defer serverConn.Close()
-
-	// Read TLS record header
-	header := make([]byte, TLSRecordHeaderLength)
-	if _, err := io.ReadFull(clientConn, header); err != nil {
-		log.Printf("Failed to read TLS header: %v", err)
-		return
-	}
-
-	// Verify TLS handshake
-	if header[0] != 0x16 { // TLS Handshake
-		log.Printf("Not a TLS handshake")
-		serverConn.Write(header)
-		proxy(clientConn, serverConn)
-		return
-	}
-
-	// Get record length
-	recordLen := uint16(header[3])<<8 | uint16(header[4])
-	if recordLen > MaxTLSRecordLength {
-		log.Printf("TLS record too large: %d", recordLen)
-		return
-	}
-
-	// Read the full handshake
-	record := make([]byte, recordLen)
-	if _, err := io.ReadFull(clientConn, record); err != nil {
-		log.Printf("Failed to read handshake record: %v", err)
-		return
-	}
-
-	// Parse ClientHello using crypto/tls
-	clientHello, err := parseClientHello(record)
-	if err != nil {
-		log.Printf("Failed to parse ClientHello: %v", err)
-	}
-
-	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
-
-	if defaultDeny {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Allow
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionAllowed,
-					count,
-				)
-			} else {
-				// Block
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count)
-				rejectTLSConnection(clientConn, TLSAccessDenied)
-				return
-			}
-		} else {
-			// Block
-			logTLSConnection(clientConn, origDst, "", ActionBlocked, 0)
-			rejectTLSConnection(clientConn, TLSAccessDenied)
-			return
-		}
-	} else {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Block
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionBlocked,
-					count,
-				)
-				rejectTLSConnection(clientConn, TLSAccessDenied)
-				return
-			} else {
-				// Allow
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count)
-			}
-		} else {
-			// Allow
-			logTLSConnection(clientConn, origDst, "", ActionAllowed, 0)
-		}
-	}
-
-	// Forward the handshake
-	serverConn.Write(header)
-	serverConn.Write(record)
-
-	// Continue proxying
-	proxy(clientConn, serverConn)
-}
-
+// Parse the ClientHello from a TLS record.
 func parseClientHello(record []byte) (*tls.ClientHelloInfo, error) {
 	hello := &tls.ClientHelloInfo{
 		Conn: &fakeConn{},
@@ -370,51 +318,127 @@ func parseClientHello(record []byte) (*tls.ClientHelloInfo, error) {
 	return hello, nil
 }
 
-// fakeConn implements the minimal net.Conn interface needed for ClientHelloInfo
-type fakeConn struct {
-	net.Conn
-}
-
+// ConnectionState returns a dummy tls.ConnectionState.
 func (c *fakeConn) ConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
 }
 
-func proxy(client, server net.Conn) {
-	done := make(chan bool, 2)
-	copy := func(dst, src net.Conn) {
-		io.Copy(dst, src)
-		done <- true
-	}
-	go copy(server, client)
-	go copy(client, server)
-	<-done
-}
+// Handle a connection.
+func handleConnection(clientConn net.Conn) {
+	defer clientConn.Close()
 
-func loadDomainList(filename string) error {
-	file, err := os.Open(filename)
+	// Get original destination
+	origDst, err := getOriginalDst(clientConn)
 	if err != nil {
-		return err
+		log.Printf("Failed to get original destination: %v", err)
+		return
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		domain := strings.TrimSpace(scanner.Text())
-		if domain == "" || strings.HasPrefix(domain, "#") {
-			continue
-		}
+	// Peek at the first byte to check if it's TLS
+	firstByte := make([]byte, 1)
+	n, err := clientConn.Read(firstByte)
+	if err != nil || n == 0 {
+		allowConnection(clientConn, origDst, nil, nil)
+		return
+	}
 
-		domainList[domain] = 0
-		if defaultDeny {
-			log.Printf("Allowing domain: %s", domain)
+	// If it's not a TLS handshake (0x16), allow the connection
+	if firstByte[0] != 0x16 {
+		allowConnection(clientConn, origDst, firstByte, nil)
+		return
+	}
+
+	// Read the rest of the TLS record header
+	header := make([]byte, TLSRecordHeaderLength-1) // -1 because we already read the first byte
+	if _, err := io.ReadFull(clientConn, header); err != nil {
+		allowConnection(clientConn, origDst, firstByte, nil)
+		return
+	}
+
+	// Combine the first byte with the rest of the header
+	fullHeader := append(firstByte, header...)
+
+	// Verify TLS handshake
+	if fullHeader[0] != 0x16 { // TLS Handshake
+		allowConnection(clientConn, origDst, fullHeader, nil)
+		return
+	}
+
+	// Get record length
+	recordLen := uint16(fullHeader[3])<<8 | uint16(fullHeader[4])
+	if recordLen > MaxTLSRecordLength {
+		log.Printf("TLS record too large: %d", recordLen)
+		return
+	}
+
+	// Read the full handshake
+	record := make([]byte, recordLen)
+	if _, err := io.ReadFull(clientConn, record); err != nil {
+		log.Printf("Failed to read handshake record: %v", err)
+		return
+	}
+
+	// Parse ClientHello using crypto/tls
+	clientHello, err := parseClientHello(record)
+	if err != nil {
+		log.Printf("Failed to parse ClientHello: %v", err)
+	}
+
+	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
+
+	if defaultDeny {
+		if !isEmptySNI {
+			count, matched := isDomainInList(clientHello.ServerName)
+			if matched {
+				// Allow
+				logTLSConnection(
+					clientConn,
+					origDst,
+					clientHello.ServerName,
+					ActionAllowed,
+					count,
+				)
+			} else {
+				// Block
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count)
+				blockConnection(clientConn, TLSAccessDenied)
+				return
+			}
 		} else {
-			log.Printf("Blocking domain: %s", domain)
+			// Block
+			logTLSConnection(clientConn, origDst, "", ActionBlocked, 0)
+			blockConnection(clientConn, TLSAccessDenied)
+			return
 		}
+	} else {
+		if !isEmptySNI {
+			count, matched := isDomainInList(clientHello.ServerName)
+			if matched {
+				// Block
+				logTLSConnection(
+					clientConn,
+					origDst,
+					clientHello.ServerName,
+					ActionBlocked,
+					count,
+				)
+				blockConnection(clientConn, TLSAccessDenied)
+				return
+			} else {
+				// Allow
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count)
+			}
+		} else {
+			// Allow
+			logTLSConnection(clientConn, origDst, "", ActionAllowed, 0)
+		}
+
 	}
 
-	return scanner.Err()
+	allowConnection(clientConn, origDst, fullHeader, record)
 }
 
+// Log a TLS connection.
 func logTLSConnection(src net.Conn, dst string, sni string, action string, count int) {
 	format := fmt.Sprintf(
 		"%s SNI [%s] TLS connection from [%s] to [%s]",
@@ -431,7 +455,8 @@ func logTLSConnection(src net.Conn, dst string, sni string, action string, count
 	log.Print(format)
 }
 
-func rejectTLSConnection(clientConn net.Conn, tlsErrorCode TLSErrorCode) {
+// Block a connection.
+func blockConnection(clientConn net.Conn, tlsErrorCode TLSErrorCode) {
 	alert := []byte{
 		0x15,       // Alert protocol
 		0x03, 0x03, // TLS version 1.2
@@ -443,25 +468,34 @@ func rejectTLSConnection(clientConn net.Conn, tlsErrorCode TLSErrorCode) {
 	clientConn.Close()
 }
 
-func isSubdomainMatch(domain, pattern string) bool {
-	// If pattern starts with ".", it's a wildcard subdomain match
-	if strings.HasPrefix(pattern, ".") {
-		// Remove the leading dot for comparison
-		pattern = pattern[1:]
-		// Domain must be longer than pattern (to have subdomain)
-		// and must end with the pattern
-		return len(domain) > len(pattern) && strings.HasSuffix(domain, pattern)
+// Allow a connection.
+func allowConnection(clientConn net.Conn, origDst string, header []byte, record []byte) {
+	// Connect to original destination
+	serverConn, err := net.Dial("tcp", origDst)
+	if err != nil {
+		log.Printf("Failed to connect to original destination %s: %v", origDst, err)
+		return
 	}
-	// Otherwise, exact match only
-	return domain == pattern
+	defer serverConn.Close()
+
+	if header != nil && record != nil {
+		// Forward the handshake
+		serverConn.Write(header)
+		serverConn.Write(record)
+	}
+
+	// Continue proxying
+	proxy(clientConn, serverConn)
 }
 
-func isDomainInList(domain string) (int, bool) {
-	for pattern := range domainList {
-		if isSubdomainMatch(domain, pattern) {
-			domainList[pattern]++ // Increment counter for the matching pattern
-			return domainList[pattern], true
-		}
+// Proxy a connection.
+func proxy(client, server net.Conn) {
+	done := make(chan bool, 2)
+	copy := func(dst, src net.Conn) {
+		io.Copy(dst, src)
+		done <- true
 	}
-	return 0, false
+	go copy(server, client)
+	go copy(client, server)
+	<-done
 }
