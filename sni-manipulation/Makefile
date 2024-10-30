@@ -4,6 +4,7 @@ GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 BINARY_NAME_CLIENT=client
 BINARY_NAME_SERVER=server
+BINARY_NAME_FILTER=filter
 DIST_DIR=dist
 CERTS_DIR=server/certs
 
@@ -20,7 +21,7 @@ SNI_VALUE=spoofed.com
 
 all: build
 
-build: create-dirs generate-certs build-client build-server
+build: create-dirs generate-certs build-client build-server build-filter
 
 create-dirs:
 	mkdir -p $(DIST_DIR)
@@ -37,6 +38,10 @@ build-server:
 	cd server && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_SERVER) main.go
 	cd server && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_SERVER)-linux-amd64 main.go
 
+build-filter:
+	cd filter && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER) main.go
+	cd filter && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER)-linux-amd64 main.go
+
 clean:
 	$(GOCLEAN)
 	rm -rf $(DIST_DIR)
@@ -48,4 +53,7 @@ run-server:
 run-client:
 	./$(DIST_DIR)/$(BINARY_NAME_CLIENT) $(TARGET_HOST) $(SNI_VALUE)
 
-.PHONY: all build create-dirs build-client build-server clean run-client run-server generate-certs
+run-filter:
+	./$(DIST_DIR)/$(BINARY_NAME_FILTER) $(HOST) $(PORT) $(TARGET_HOST) $(SNI_VALUE)
+
+.PHONY: all build create-dirs build-client build-server build-filter clean run-client run-server run-filter generate-certs

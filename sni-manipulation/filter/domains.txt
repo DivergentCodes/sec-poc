@@ -1,0 +1,4 @@
+ubuntu.com
+.github.com
+google.com
+.google.com

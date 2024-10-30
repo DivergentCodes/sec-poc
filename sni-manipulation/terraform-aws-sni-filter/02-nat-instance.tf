@@ -12,7 +12,7 @@ resource "aws_instance" "nat_instance" {
   # Find user-data.txt after boot:
   #   sudo cat /var/lib/cloud/instances/*/user-data.txt
   user_data = templatefile(
-    "${local.script_path}/user_data_nat_instance_squid_centos.sh",
+    "${local.script_path}/user_data_nat_instance_filter_centos.sh",
     {
       allowed_egress_web_domains  = join("\n", var.allowed_egress_web_domains)
     }
@@ -25,7 +25,6 @@ resource "aws_instance" "nat_instance" {
   source_dest_check = false
 
   vpc_security_group_ids = toset(flatten([
-    var.additional_nat_instance_security_group_ids,
     aws_security_group.nat_instance.id,
   ]))
 
@@ -108,5 +107,26 @@ ssh -i ${local.ssh_key_path}/id_ed25519 \
     ${local.ami_user}@${aws_instance.nat_instance.public_ip}
 EOF
   filename = "${local.script_path}/nat-login.sh"
+  file_permission = "0755"
+}
+
+resource "local_file" "nat_filter_upload" {
+  content = <<-EOF
+#!/bin/bash
+scp -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ../dist/filter-linux-amd64 \
+    ${local.ami_user}@${aws_instance.nat_instance.public_ip}:/home/${local.ami_user}/filter
+
+scp -i ${local.ssh_key_path}/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    ../filter/domains.txt \
+    ${local.ami_user}@${aws_instance.nat_instance.public_ip}:/home/${local.ami_user}/domains.txt
+EOF
+  filename = "${local.script_path}/nat-filter-upload.sh"
   file_permission = "0755"
 }
