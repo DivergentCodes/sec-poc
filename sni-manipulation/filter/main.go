@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"encoding/binary"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"strings"
 	"syscall"
 )
 
@@ -18,9 +21,36 @@ const (
 	SO_ORIGINAL_DST       = 80
 )
 
+var (
+	domainList  map[string]int
+	defaultDeny bool
+)
+
 func main() {
 	listenPort := flag.String("port", "3130", "Local port to listen on")
+	domainFile := flag.String("domain-file", "", "File containing domain rules (one domain per line)")
+	defaultAction := flag.String("default", "", "Default action (allow/deny) for unlisted domains")
 	flag.Parse()
+
+	// Check if required arguments are provided
+	if *domainFile == "" {
+		log.Fatal("--domain-file argument is required")
+	}
+	if *defaultAction == "" {
+		log.Fatal("--default argument is required")
+	}
+	if *defaultAction != "allow" && *defaultAction != "deny" {
+		log.Fatal("--default argument must be either 'allow' or 'deny'")
+	}
+
+	// Initialize domain filtering
+	domainList = make(map[string]int)
+	defaultDeny = *defaultAction == "deny"
+
+	// Load domain list from file
+	if err := loadDomainList(*domainFile); err != nil {
+		log.Fatalf("Failed to load domain list: %v", err)
+	}
 
 	listener, err := net.Listen("tcp", ":"+*listenPort)
 	if err != nil {
@@ -127,6 +157,34 @@ func handleConnection(clientConn net.Conn) {
 			origDst,
 			clientHello.ServerName,
 		)
+	}
+
+	if defaultDeny {
+		// Default deny
+		if clientHello == nil || clientHello.ServerName == "" {
+			log.Printf("Blocked: no SNI")
+		} else {
+			_, exists := domainList[clientHello.ServerName]
+			if exists {
+				domainList[clientHello.ServerName]++
+				log.Printf("Allowed: %s (count: %d)", clientHello.ServerName, domainList[clientHello.ServerName])
+			} else {
+				log.Printf("Blocked: %s", clientHello.ServerName)
+			}
+		}
+	} else {
+		// Default allow
+		if clientHello == nil || clientHello.ServerName == "" {
+			log.Printf("Allowed: no SNI")
+		} else {
+			_, exists := domainList[clientHello.ServerName]
+			if exists {
+				domainList[clientHello.ServerName]++
+				log.Printf("Blocked: %s (count: %d)", clientHello.ServerName, domainList[clientHello.ServerName])
+			} else {
+				log.Printf("Allowed: %s", clientHello.ServerName)
+			}
+		}
 	}
 
 	// Forward the handshake
@@ -256,4 +314,29 @@ func proxy(client, server net.Conn) {
 	go copy(server, client)
 	go copy(client, server)
 	<-done
+}
+
+func loadDomainList(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		domain := strings.TrimSpace(scanner.Text())
+		if domain == "" || strings.HasPrefix(domain, "#") {
+			continue
+		}
+
+		domainList[domain] = 0
+		if defaultDeny {
+			log.Printf("Allowing domain: %s", domain)
+		} else {
+			log.Printf("Blocking domain: %s", domain)
+		}
+	}
+
+	return scanner.Err()
 }
