@@ -12,7 +12,7 @@ resource "aws_instance" "nat_instance" {
   # Find user-data.txt after boot:
   #   sudo cat /var/lib/cloud/instances/*/user-data.txt
   user_data = templatefile(
-    "${local.script_path}/user_data_nat_instance_centos.sh",
+    "${local.script_path}/user_data_nat_instance_squid_centos.sh",
     {
       allowed_egress_web_domains  = join("\n", var.allowed_egress_web_domains)
     }
