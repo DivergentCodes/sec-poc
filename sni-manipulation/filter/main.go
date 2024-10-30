@@ -5,8 +5,11 @@ Usage:
 
 	./filter --domain-file <path> --default <allow|deny> [--port <port>]
 
-It is designed to be used as a reverse proxy for TLS connections, listening on a
-local port and forwarding to the original destination.
+It is designed to be used as a transparent proxy for TLS connections, listening on an
+intermediate server's local port and forwarding to the original destination.
+
+The domain list file contains one domain per line. Domains can use wildcards
+(e.g. ".github.com" will match any github.com subdomain, but not github.com itself).
 
 An iptables rules can be used to redirect the traffic to the local port.
 
