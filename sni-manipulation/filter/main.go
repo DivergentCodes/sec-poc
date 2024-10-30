@@ -46,7 +46,8 @@ const (
 	// TLS Record Header Length
 	TLSRecordHeaderLength = 5
 	MaxTLSRecordLength    = 16384 + 2048
-	SO_ORIGINAL_DST       = 80
+	// Socket option to get the original destination
+	SO_ORIGINAL_DST = 80
 
 	ActionAllowed = "Allowed"
 	ActionBlocked = "Blocked"
