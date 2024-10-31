@@ -37,6 +37,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // TLSErrorCode represents a TLS alert code value
@@ -88,6 +89,7 @@ const (
 var (
 	domainList  map[string]int
 	defaultDeny bool
+	verifyCerts bool
 )
 
 // Main entry point.
@@ -95,6 +97,7 @@ func main() {
 	listenPort := flag.String("port", "3130", "Local port to listen on")
 	domainFile := flag.String("domain-file", "", "File containing domain rules (one domain per line)")
 	defaultAction := flag.String("default", "", "Default action (allow/deny) for unlisted domains")
+	verifyFlag := flag.Bool("verify", false, "Verify server certificates match SNI")
 	flag.Parse()
 
 	// Check if required arguments are provided
@@ -111,6 +114,11 @@ func main() {
 	// Initialize domain filtering
 	domainList = make(map[string]int)
 	defaultDeny = *defaultAction == "deny"
+	verifyCerts = *verifyFlag
+
+	if verifyCerts {
+		log.Printf("Certificate verification enabled")
+	}
 
 	// Load domain list from file
 	if err := loadDomainList(*domainFile); err != nil {
@@ -323,6 +331,40 @@ func (c *fakeConn) ConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
 }
 
+// Verify certificate
+func verifyCertificate(address, sni string) error {
+	conf := &tls.Config{
+		ServerName:         sni,
+		InsecureSkipVerify: false,
+	}
+
+	// Set a reasonable timeout for the TLS handshake
+	dialer := &net.Dialer{
+		Timeout: 5 * time.Second,
+	}
+
+	conn, err := tls.DialWithDialer(dialer, "tcp", address, conf)
+	if err != nil {
+		return fmt.Errorf("TLS connection failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Get the peer certificates
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return fmt.Errorf("no certificates presented by server")
+	}
+
+	// Verify the certificate matches the SNI
+	for _, cert := range certs {
+		if err := cert.VerifyHostname(sni); err == nil {
+			return nil // Found a valid certificate
+		}
+	}
+
+	return fmt.Errorf("no valid certificate found for %s", sni)
+}
+
 // Handle a connection.
 func handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
@@ -384,72 +426,58 @@ func handleConnection(clientConn net.Conn) {
 		log.Printf("Failed to parse ClientHello: %v", err)
 	}
 
+	count := 0
 	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
 
-	if defaultDeny {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Allow
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionAllowed,
-					count,
-				)
-			} else {
-				// Block
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count)
-				blockConnection(clientConn, TLSAccessDenied)
+	if defaultDeny && isEmptySNI {
+		logTLSConnection(clientConn, origDst, "", ActionBlocked, 0, "empty SNI")
+		blockConnection(clientConn, TLSAccessDenied)
+		return
+	}
+
+	if !isEmptySNI {
+		if verifyCerts {
+			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
+				blockConnection(clientConn, TLSBadCertificate)
 				return
 			}
-		} else {
-			// Block
-			logTLSConnection(clientConn, origDst, "", ActionBlocked, 0)
+		}
+
+		count, matched := isDomainInList(clientHello.ServerName)
+		if defaultDeny && !matched {
+			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "not in allow-list")
 			blockConnection(clientConn, TLSAccessDenied)
 			return
 		}
-	} else {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Block
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionBlocked,
-					count,
-				)
-				blockConnection(clientConn, TLSAccessDenied)
-				return
-			} else {
-				// Allow
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count)
-			}
-		} else {
-			// Allow
-			logTLSConnection(clientConn, origDst, "", ActionAllowed, 0)
+		if !defaultDeny && matched {
+			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "in block-list")
+			blockConnection(clientConn, TLSAccessDenied)
+			return
 		}
-
 	}
 
+	// Allow
+	logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count, "")
 	allowConnection(clientConn, origDst, fullHeader, record)
 }
 
 // Log a TLS connection.
-func logTLSConnection(src net.Conn, dst string, sni string, action string, count int) {
+func logTLSConnection(src net.Conn, dst string, sni string, action string, count int, msg string) {
 	format := fmt.Sprintf(
-		"%s SNI [%s] TLS connection from [%s] to [%s]",
+		"%s TLS connection from [%s] to [%s] with SNI [%s]",
 		action,
-		sni,
 		src.RemoteAddr(),
 		dst,
+		sni,
 	)
 
 	if count > 0 {
 		format += fmt.Sprintf(" (%d)", count)
+	}
+
+	if msg != "" {
+		format += fmt.Sprintf(" (%s)", msg)
 	}
 
 	log.Print(format)
