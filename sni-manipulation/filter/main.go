@@ -36,6 +36,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -84,12 +85,18 @@ const (
 	TLSUserCanceled           TLSErrorCode = 90
 	TLSNoRenegotiation        TLSErrorCode = 100
 	TLSUnsupportedExtension   TLSErrorCode = 110
+
+	certCacheExpiration = 1 * time.Hour // How long to cache successful validations
 )
 
 var (
-	domainList  map[string]int
-	defaultDeny bool
-	verifyCerts bool
+	domainList      map[string]int
+	defaultDeny     bool
+	verifyCerts     bool
+	certValidations = &certCache{
+		validations: make(map[string][]string),
+		lastChecked: make(map[string]time.Time),
+	}
 )
 
 // Main entry point.
@@ -132,6 +139,27 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("TLS filter listening on port %s", *listenPort)
+
+	// Start cache cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(certCacheExpiration)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			certValidations.Lock()
+			now := time.Now()
+
+			// Remove expired entries
+			for sni, lastChecked := range certValidations.lastChecked {
+				if now.Sub(lastChecked) > certCacheExpiration {
+					delete(certValidations.validations, sni)
+					delete(certValidations.lastChecked, sni)
+				}
+			}
+
+			certValidations.Unlock()
+		}
+	}()
 
 	for {
 		clientConn, err := listener.Accept()
@@ -333,12 +361,17 @@ func (c *fakeConn) ConnectionState() tls.ConnectionState {
 
 // Verify certificate
 func verifyCertificate(address, sni string) error {
+	// Check cache first using full address
+	if certValidations.isValid(sni, address) {
+		return nil
+	}
+
+	// Perform actual verification
 	conf := &tls.Config{
 		ServerName:         sni,
 		InsecureSkipVerify: false,
 	}
 
-	// Set a reasonable timeout for the TLS handshake
 	dialer := &net.Dialer{
 		Timeout: 5 * time.Second,
 	}
@@ -349,7 +382,6 @@ func verifyCertificate(address, sni string) error {
 	}
 	defer conn.Close()
 
-	// Get the peer certificates
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
 		return fmt.Errorf("no certificates presented by server")
@@ -358,7 +390,9 @@ func verifyCertificate(address, sni string) error {
 	// Verify the certificate matches the SNI
 	for _, cert := range certs {
 		if err := cert.VerifyHostname(sni); err == nil {
-			return nil // Found a valid certificate
+			// Cache successful validation with full address
+			certValidations.add(sni, address)
+			return nil
 		}
 	}
 
@@ -526,4 +560,54 @@ func proxy(client, server net.Conn) {
 	go copy(server, client)
 	go copy(client, server)
 	<-done
+}
+
+type certCache struct {
+	sync.RWMutex
+	validations map[string][]string  // map[sni][]addresses (host:port)
+	lastChecked map[string]time.Time // map[sni]lastValidationTime
+}
+
+func (c *certCache) isValid(sni, address string) bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	// Check if we have a cached validation
+	if addresses, exists := c.validations[sni]; exists {
+		// Check if the validation has expired
+		if time.Since(c.lastChecked[sni]) > certCacheExpiration {
+			return false
+		}
+
+		// Check if this address is in the validated list
+		for _, addr := range addresses {
+			if addr == address {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *certCache) add(sni, address string) {
+	c.Lock()
+	defer c.Unlock()
+
+	// Check if we already have this SNI
+	if addresses, exists := c.validations[sni]; exists {
+		// Check if we already have this address
+		for _, addr := range addresses {
+			if addr == address {
+				return
+			}
+		}
+		// Add the new address to existing slice
+		c.validations[sni] = append(addresses, address)
+	} else {
+		// Create new entry
+		c.validations[sni] = []string{address}
+	}
+
+	// Update last checked time
+	c.lastChecked[sni] = time.Now()
 }
