@@ -36,7 +36,9 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 // TLSErrorCode represents a TLS alert code value
@@ -83,11 +85,18 @@ const (
 	TLSUserCanceled           TLSErrorCode = 90
 	TLSNoRenegotiation        TLSErrorCode = 100
 	TLSUnsupportedExtension   TLSErrorCode = 110
+
+	certCacheExpiration = 1 * time.Hour // How long to cache successful validations
 )
 
 var (
-	domainList  map[string]int
-	defaultDeny bool
+	domainList      map[string]int
+	defaultDeny     bool
+	verifyCerts     bool
+	certValidations = &certCache{
+		validations: make(map[string][]string),
+		lastChecked: make(map[string]time.Time),
+	}
 )
 
 // Main entry point.
@@ -95,6 +104,7 @@ func main() {
 	listenPort := flag.String("port", "3130", "Local port to listen on")
 	domainFile := flag.String("domain-file", "", "File containing domain rules (one domain per line)")
 	defaultAction := flag.String("default", "", "Default action (allow/deny) for unlisted domains")
+	verifyFlag := flag.Bool("verify", false, "Verify server certificates match SNI")
 	flag.Parse()
 
 	// Check if required arguments are provided
@@ -111,6 +121,11 @@ func main() {
 	// Initialize domain filtering
 	domainList = make(map[string]int)
 	defaultDeny = *defaultAction == "deny"
+	verifyCerts = *verifyFlag
+
+	if verifyCerts {
+		log.Printf("Certificate verification enabled")
+	}
 
 	// Load domain list from file
 	if err := loadDomainList(*domainFile); err != nil {
@@ -124,6 +139,27 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("TLS filter listening on port %s", *listenPort)
+
+	// Start cache cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(certCacheExpiration)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			certValidations.Lock()
+			now := time.Now()
+
+			// Remove expired entries
+			for sni, lastChecked := range certValidations.lastChecked {
+				if now.Sub(lastChecked) > certCacheExpiration {
+					delete(certValidations.validations, sni)
+					delete(certValidations.lastChecked, sni)
+				}
+			}
+
+			certValidations.Unlock()
+		}
+	}()
 
 	for {
 		clientConn, err := listener.Accept()
@@ -323,6 +359,46 @@ func (c *fakeConn) ConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
 }
 
+// Verify certificate
+func verifyCertificate(address, sni string) error {
+	// Check cache first using full address
+	if certValidations.isValid(sni, address) {
+		return nil
+	}
+
+	// Perform actual verification
+	conf := &tls.Config{
+		ServerName:         sni,
+		InsecureSkipVerify: false,
+	}
+
+	dialer := &net.Dialer{
+		Timeout: 5 * time.Second,
+	}
+
+	conn, err := tls.DialWithDialer(dialer, "tcp", address, conf)
+	if err != nil {
+		return fmt.Errorf("TLS connection failed: %v", err)
+	}
+	defer conn.Close()
+
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return fmt.Errorf("no certificates presented by server")
+	}
+
+	// Verify the certificate matches the SNI
+	for _, cert := range certs {
+		if err := cert.VerifyHostname(sni); err == nil {
+			// Cache successful validation with full address
+			certValidations.add(sni, address)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no valid certificate found for %s", sni)
+}
+
 // Handle a connection.
 func handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
@@ -384,72 +460,58 @@ func handleConnection(clientConn net.Conn) {
 		log.Printf("Failed to parse ClientHello: %v", err)
 	}
 
+	count := 0
 	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
 
-	if defaultDeny {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Allow
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionAllowed,
-					count,
-				)
-			} else {
-				// Block
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count)
-				blockConnection(clientConn, TLSAccessDenied)
+	if defaultDeny && isEmptySNI {
+		logTLSConnection(clientConn, origDst, "", ActionBlocked, 0, "empty SNI")
+		blockConnection(clientConn, TLSAccessDenied)
+		return
+	}
+
+	if !isEmptySNI {
+		if verifyCerts {
+			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
+				blockConnection(clientConn, TLSBadCertificate)
 				return
 			}
-		} else {
-			// Block
-			logTLSConnection(clientConn, origDst, "", ActionBlocked, 0)
+		}
+
+		count, matched := isDomainInList(clientHello.ServerName)
+		if defaultDeny && !matched {
+			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "not in allow-list")
 			blockConnection(clientConn, TLSAccessDenied)
 			return
 		}
-	} else {
-		if !isEmptySNI {
-			count, matched := isDomainInList(clientHello.ServerName)
-			if matched {
-				// Block
-				logTLSConnection(
-					clientConn,
-					origDst,
-					clientHello.ServerName,
-					ActionBlocked,
-					count,
-				)
-				blockConnection(clientConn, TLSAccessDenied)
-				return
-			} else {
-				// Allow
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count)
-			}
-		} else {
-			// Allow
-			logTLSConnection(clientConn, origDst, "", ActionAllowed, 0)
+		if !defaultDeny && matched {
+			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "in block-list")
+			blockConnection(clientConn, TLSAccessDenied)
+			return
 		}
-
 	}
 
+	// Allow
+	logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count, "")
 	allowConnection(clientConn, origDst, fullHeader, record)
 }
 
 // Log a TLS connection.
-func logTLSConnection(src net.Conn, dst string, sni string, action string, count int) {
+func logTLSConnection(src net.Conn, dst string, sni string, action string, count int, msg string) {
 	format := fmt.Sprintf(
-		"%s SNI [%s] TLS connection from [%s] to [%s]",
+		"%s TLS connection from [%s] to [%s] with SNI [%s]",
 		action,
-		sni,
 		src.RemoteAddr(),
 		dst,
+		sni,
 	)
 
 	if count > 0 {
 		format += fmt.Sprintf(" (%d)", count)
+	}
+
+	if msg != "" {
+		format += fmt.Sprintf(" (%s)", msg)
 	}
 
 	log.Print(format)
@@ -498,4 +560,54 @@ func proxy(client, server net.Conn) {
 	go copy(server, client)
 	go copy(client, server)
 	<-done
+}
+
+type certCache struct {
+	sync.RWMutex
+	validations map[string][]string  // map[sni][]addresses (host:port)
+	lastChecked map[string]time.Time // map[sni]lastValidationTime
+}
+
+func (c *certCache) isValid(sni, address string) bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	// Check if we have a cached validation
+	if addresses, exists := c.validations[sni]; exists {
+		// Check if the validation has expired
+		if time.Since(c.lastChecked[sni]) > certCacheExpiration {
+			return false
+		}
+
+		// Check if this address is in the validated list
+		for _, addr := range addresses {
+			if addr == address {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *certCache) add(sni, address string) {
+	c.Lock()
+	defer c.Unlock()
+
+	// Check if we already have this SNI
+	if addresses, exists := c.validations[sni]; exists {
+		// Check if we already have this address
+		for _, addr := range addresses {
+			if addr == address {
+				return
+			}
+		}
+		// Add the new address to existing slice
+		c.validations[sni] = append(addresses, address)
+	} else {
+		// Create new entry
+		c.validations[sni] = []string{address}
+	}
+
+	// Update last checked time
+	c.lastChecked[sni] = time.Now()
 }
