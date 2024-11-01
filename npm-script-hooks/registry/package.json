@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "start": "npx verdaccio --config verdaccio-config.yaml"
+  },
+  "dependencies": {
+    "verdaccio": "^6.0.1"
+  },
+  "verdaccio:registry": "https://registry.npmjs.org"
+}
