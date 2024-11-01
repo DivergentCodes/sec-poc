@@ -1,0 +1,13 @@
+{
+  "name": "pkg-d-githook",
+  "version": "1.0.0",
+  "description": "Dependency graph depth 4 that creates a git hook",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node postinstall.js",
+    "pub:refresh": "npm unpublish pkg-d-githook --force && npm publish",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}

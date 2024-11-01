@@ -1,0 +1,3 @@
+# Ignore package-lock.json so that new versions of dependencies are installed
+# without pinning the versions in the lock file.
+package-lock.json
