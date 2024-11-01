@@ -11,7 +11,6 @@ A defensive PoC tool is included that explores possible countermeasures.
 It filters TLS traffic by SNI value, like Squid proxy, and then goes one step further by validating the target server's certificate. The certificate
 validation result is cached for performance, like a stateful firewall does.
 
-
 ## Background
 
 SNI manipulation is a technique to bypass HTTP traffic controls that filter by domain by forging the SNI value in the TLS handshake.
