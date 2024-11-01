@@ -1,7 +1,7 @@
 {
   "name": "pkg-a",
   "version": "1.0.0",
-  "description": "Top level dependency",
+  "description": "Dependency graph depth 1",
   "main": "index.js",
   "scripts": {
     "postinstall": "echo \"pkg-a installed and executed postinstall at $(date +\"%Y-%m-%d %H:%M:%S\")\" >> postinstall-script.log",
@@ -9,5 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "pkg-b": "^1.0.0"
+  }
 }
