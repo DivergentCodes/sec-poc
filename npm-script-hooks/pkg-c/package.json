@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "pkg-d-js": "^1.0.0",
-    "pkg-d-githook": "^1.0.0"
+    "pkg-d-githook": "^1.0.0",
+    "pkg-d-npmdep": "^1.0.0"
   }
 }
