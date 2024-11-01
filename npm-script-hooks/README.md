@@ -15,9 +15,12 @@ The Verdaccio registry is configured to run on port `4873` and has the predefine
 
 Local packages needs to be published to the Verdaccio registry before they can be installed to demonstrate the hook execution.
 
-1. Start the Verdaccio registry with `npm run start:verdaccio`.
-2. Publish the local packages to the Verdaccio registry with `npm publish`.
-3. Run `npm install` in the `myapp` directory to trigger the postinstall scripts.
+1. Start the Verdaccio registry with `make start-registry`.
+2. Publish the local packages to the Verdaccio registry with `make publish`.
+3. Trigger the postinstall scripts by running `npm install` in the `myapp` directory.
+4. Look at the logs in the Verdaccio registry `myapp/node_modules/<package-name>/postinstall-scripts.log` files to see the hook execution.
+
+The reverse shell payload can be caught by running the SNI server PoC in a separate terminal with `./server 127.0.0.1 8443`.
 
 ## Resources
 
