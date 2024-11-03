@@ -10,6 +10,8 @@ import {
 import { AuthenticatorTransportFuture, CredentialDeviceType } from '@simplewebauthn/types';
 import crypto from 'crypto';
 import { verifyYubikeyAttestation } from './utils/attestation';
+import base64url from 'base64url';
+import cbor from 'cbor';
 
 declare module 'express-session' {
   interface SessionData {
@@ -84,7 +86,11 @@ interface AuthenticationDetails {
 }
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const RP_ID = process.env.RP_ID || 'localhost';
+const RP_NAME = process.env.RP_NAME || 'WebAuthn TypeScript Demo Default';
+const ORIGIN = process.env.ORIGIN || `http://${RP_ID}:${PORT}`;
 
 // In-memory storage - replace with database in production
 const users: Map<string, UserModel> = new Map();
@@ -99,14 +105,24 @@ app.use(session({
   saveUninitialized: true,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
-  }
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  },
+  proxy: process.env.NODE_ENV === 'production', // Required for secure cookies in production
 }));
+// Add this right after session middleware to debug
+app.use((req, res, next) => {
+  console.log('Session ID:', req.sessionID);
 
-// Config
-const rpId = process.env.RP_ID || 'localhost';
-const rpName = process.env.RP_NAME || 'WebAuthn TypeScript Demo';
-const origin = process.env.ORIGIN || `http://${rpId}:${port}`;
+  // Explicitly set CORS headers for every response
+  res.header('Access-Control-Allow-Origin', req.headers.origin || ORIGIN);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+  next();
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -123,8 +139,8 @@ app.get('/register', async (req, res) => {
 
   console.log(`Generating registration options for user: ${theUser.name}`);
   const options = await generateRegistrationOptions({
-    rpName,
-    rpID: rpId,
+    rpName: RP_NAME,
+    rpID: RP_ID,
     userID: Buffer.from(theUser.id),
     userName: theUser.name,
     challenge: Buffer.from(crypto.randomBytes(32)),
@@ -136,25 +152,25 @@ app.get('/register', async (req, res) => {
   });
 
   console.log('Registration options generated:', {
-    rpName,
-    rpID: rpId,
+    rpName: RP_NAME,
+    rpID: RP_ID,
     userId: theUser.id,
     userName: theUser.name,
     challengeLength: options.challenge.length,
   });
 
   req.session.challenge = options.challenge;
-  console.log('Challenge stored in session');
 
-  req.session.save((err) => {
-    if (err) {
-      console.error('Failed to save session:', err);
-      res.status(500).json({ status: 'error', message: 'Failed to save session' });
-      return;
-    }
-    console.log('Session saved successfully, sending options to client');
-    res.json(options);
+  // Force session save and wait for it
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) reject(err);
+      else resolve(true);
+    });
   });
+  console.log('Set-Cookie header:', res.getHeader('set-cookie'));
+  console.log('Session saved successfully, sending options to client');
+  res.json(options);
 });
 
 /**
@@ -173,15 +189,15 @@ app.post('/register', async (req, res) => {
     }
 
     console.log('Verifying registration response...');
-    console.log('Expected origin:', origin);
-    console.log('Expected RPID:', rpId);
+    console.log('Expected origin:', ORIGIN);
+    console.log('Expected RPID:', RP_ID);
 
     // Verify the registration response
     const verification = await verifyRegistrationResponse({
       response: body,
       expectedChallenge: req.session.challenge,
-      expectedOrigin: origin,
-      expectedRPID: rpId,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RP_ID,
     });
 
     const { verified, registrationInfo } = verification;
@@ -195,25 +211,25 @@ app.post('/register', async (req, res) => {
     const { id: credentialID, publicKey: credentialPublicKey, counter } = registrationInfo.credential;
     const { aaguid } = registrationInfo;
 
-    const attestationTrustPath = (registrationInfo.attestationObject as any)?.fmt === 'packed'
-      ? (registrationInfo.attestationObject as any)?.attStmt?.x5c || []
-      : [];
-    const attestationType = (registrationInfo.attestationObject as any)?.fmt || 'none';
+    // Decode attestationObject
+    const attestationBuffer = base64url.toBuffer(body.response.attestationObject);
+    const attestationStruct = cbor.decodeFirstSync(attestationBuffer);
+    console.log('Decoded attestation object:', {
+      fmt: attestationStruct.fmt,        // Format type (e.g., 'packed', 'fido-u2f')
+      attStmt: attestationStruct.attStmt, // Attestation statement
+      authData: attestationStruct.authData // Authenticator data
+    });
 
+    const attestationTrustPath = attestationStruct.fmt === 'packed' ? attestationStruct.attStmt.x5c : [];
+    const attestationType = attestationStruct.fmt || 'none';
     const attestationResult = await verifyYubikeyAttestation(
       attestationTrustPath,
       aaguid,
       attestationType,
     );
+    console.log('Attestation result:', attestationResult);
 
     // Store the new authenticator in the database
-    // const newAuthenticator = {
-    //   credentialID: Buffer.from(credentialID).toString('base64url'),
-    //   credentialPublicKey: Buffer.from(credentialPublicKey).toString('base64url'),
-    //   counter,
-    //   aaguid,
-    //   created: new Date().toISOString(),
-    // };
     const {
       credential,
       credentialDeviceType,
@@ -232,19 +248,12 @@ app.post('/register', async (req, res) => {
       backupEligible: credentialBackedUp,
       userVerified: false,
       lastUsed: new Date().toISOString(),
-
-      // `user` here is from Step 2
       user: {
         id: theUser.id,
         name: theUser.name,
       },
-
-      // Created by `generateRegistrationOptions()` in Step 1
       webauthnUserID: theUser.id,
-
-      // The public key bytes, used for subsequent authentication signature verification
       publicKey: credentialPublicKey,
-
       // The number of times the authenticator has been used on this site so far
       counter,
 
@@ -294,7 +303,7 @@ app.get('/authenticate', async (req, res) => {
 
     const userAuthenticators = Array.from(authenticators.values());
     const options: PublicKeyCredentialRequestOptionsJSON = await generateAuthenticationOptions({
-      rpID: rpId,
+      rpID: RP_ID,
       // Require users to use a previously-registered authenticator
       allowCredentials: userAuthenticators.map(authenticator => ({
         id: authenticator.credentialID,
@@ -337,8 +346,8 @@ app.post('/authenticate', async (req, res) => {
         const verificationParams = {
             response: body,
             expectedChallenge: req.session.challenge,
-            expectedOrigin: origin,
-            expectedRPID: rpId,
+            expectedOrigin: ORIGIN,
+            expectedRPID: RP_ID,
             requireUserVerification: true,
             credential: {
                 id: authenticator.credentialID,
@@ -408,13 +417,13 @@ app.delete('/credentials/:id', (req, res) => {
 app.get('/config', (req, res) => {
     res.json({
         environment: process.env.NODE_ENV || 'development',
-        rpName,
-        rpID: rpId,
-        origin
+        rpID: RP_ID,
+        rpName: RP_NAME,
+        origin: ORIGIN,
     });
 });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+app.listen(PORT, () => {
+  console.log(`Server running at http://localhost:${PORT}`);
 });

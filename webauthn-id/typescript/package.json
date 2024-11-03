@@ -13,6 +13,8 @@
   "dependencies": {
     "@simplewebauthn/browser": "^11.0.0",
     "@simplewebauthn/server": "^11.0.0",
+    "base64url": "^3.0.1",
+    "cbor": "^10.0.2",
     "express": "^4.21.1",
     "express-session": "^1.18.1",
     "tsx": "^4.19.2"
