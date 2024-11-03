@@ -28,6 +28,8 @@ def get_config() -> Config:
         raise ValueError('RENDER_EXTERNAL_HOSTNAME environment variable is required in production')
 
     return {
+        'ENVIRONMENT': environment,
+        'RENDER_EXTERNAL_HOSTNAME': render_host,
         'RP_ID': render_host,  # Use full subdomain
         'RP_NAME': os.getenv('RP_NAME', 'WebAuthn Demo'),
         'ORIGIN': f"https://{render_host}",

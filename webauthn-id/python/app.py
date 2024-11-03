@@ -33,6 +33,8 @@ users = {}
 credentials = {}
 
 # Update these values for your environment
+ENVIRONMENT = config['ENVIRONMENT']
+RENDER_EXTERNAL_HOSTNAME = config['RENDER_EXTERNAL_HOSTNAME']
 RP_ID = config['RP_ID']
 RP_NAME = config['RP_NAME']
 ORIGIN = config['ORIGIN']  # Change back to http://
@@ -71,7 +73,9 @@ def index():
     return render_template('index.html',
                          credentials=credentials.values(),
                          rp_id=RP_ID,
-                         rp_name=RP_NAME)
+                         rp_name=RP_NAME,
+                         environment=ENVIRONMENT,
+                         render_external_hostname=RENDER_EXTERNAL_HOSTNAME)
 
 @app.route('/register', methods=['GET'])
 def register_begin():
