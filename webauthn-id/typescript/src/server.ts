@@ -408,9 +408,9 @@ app.delete('/credentials/:id', (req, res) => {
 app.get('/config', (req, res) => {
     res.json({
         environment: process.env.NODE_ENV || 'development',
-        rpName,
-        rpID: rpId,
-        origin
+        rpID: process.env.RP_ID || 'localhost',
+        rpName: process.env.RP_NAME || 'WebAuthn TypeScript Demo',
+        origin: process.env.ORIGIN || `http://${rpId}:${port}`,
     });
 });
 
