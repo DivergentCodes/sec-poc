@@ -455,6 +455,14 @@ def delete_credential(credential_id):
         return jsonify({'status': 'success'})
     return jsonify({'error': 'Credential not found'}), 404
 
+@app.route('/.well-known/webauthn', methods=['GET'])
+def webauthn_config():
+    return jsonify({
+        "version": 1,
+        "registrationPolicies": ["none"],
+        "supportedAuthenticatorAttachment": ["platform", "cross-platform"]
+    }), 200, {'Content-Type': 'application/json'}
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000)) # Default on Render
     app.run(host='0.0.0.0', port=port)
