@@ -13,3 +13,5 @@ services:
         value: WebAuthn Demo
       - key: FLASK_SECRET
         sync: false
+      - key: PORT
+        value: 10000

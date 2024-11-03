@@ -456,5 +456,5 @@ def delete_credential(credential_id):
     return jsonify({'error': 'Credential not found'}), 404
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000)) # Default on Render
     app.run(host='0.0.0.0', port=port)
