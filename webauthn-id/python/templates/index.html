@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebAuthn Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .credential {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success { background-color: #dff0d8; }
+        .error { background-color: #f2dede; }
+        .metadata {
+            margin-left: 20px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .metadata-item {
+            margin: 5px 0;
+        }
+        .auth-history {
+            margin-top: 10px;
+            padding: 5px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .credential {
+            background-color: #f8f9fa;
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .verification-method {
+            font-size: 0.9em;
+            margin-left: 20px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .verification-cryptographic {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .verification-aaguid {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebAuthn Demo</h1>
+
+    <div>
+        <button onclick="registerCredential()">Register New Authenticator</button>
+        <button onclick="authenticate()">Authenticate</button>
+    </div>
+
+    <div id="status"></div>
+
+    <h2>Registered Authenticators</h2>
+    <div id="credentials">
+        {% for cred in credentials %}
+        <div class="credential" id="cred-{{ cred.id }}">
+            <h3>Authenticator Details</h3>
+            <div class="metadata">
+                <div class="metadata-item"><span class="detail-label">ID:</span> {{ cred.id }}</div>
+                <div class="metadata-item"><span class="detail-label">AAGUID:</span> {{ cred.aaguid }}</div>
+                <div class="metadata-item"><span class="detail-label">Type:</span> {{ cred.credential_type }}</div>
+                <div class="metadata-item"><span class="detail-label">Created:</span> {{ cred.created_at }}</div>
+                <div class="metadata-item"><span class="detail-label">Last Used:</span> {{ cred.last_used if cred.last_used else 'Never' }}</div>
+                <div class="metadata-item"><span class="detail-label">Sign Count:</span> {{ cred.sign_count }}</div>
+
+                <h4>Attestation Details</h4>
+                <div class="metadata-item">
+                    <span class="detail-label">Type:</span> {{ cred.attestation_type }}
+                </div>
+                <div class="metadata-item">
+                    <span class="detail-label">Verified Yubikey:</span>
+                    {% if cred.is_verified_yubikey %}
+                        <span style="color: green;">✓ Yes - {{ cred.yubikey_model }}</span>
+                        <br>
+                        <span class="detail-label">Verification Method:</span>
+                        {% if cred.is_cryptographically_verified %}
+                            <span style="color: green;">✓ Cryptographically Verified</span>
+                        {% else %}
+                            <span style="color: orange;">⚠ AAGUID Lookup Only</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color: red;">✗ No</span>
+                    {% endif %}
+                </div>
+                {% if cred.attestation_trust_path %}
+                <div class="metadata-item">
+                    <span class="detail-label">Trust Path:</span>
+                    <ul>
+                        {% for cert in cred.attestation_trust_path %}
+                        <li>{{ cert[:64] }}...</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <h4>Security Properties</h4>
+                <div class="metadata-item"><span class="detail-label">Backup Eligible:</span> {{ cred.backup_eligible }}</div>
+                <div class="metadata-item"><span class="detail-label">Backup State:</span> {{ cred.backup_state }}</div>
+                <div class="metadata-item"><span class="detail-label">User Verified:</span> {{ cred.user_verified }}</div>
+                <div class="metadata-item"><span class="detail-label">User Present:</span> {{ cred.user_present }}</div>
+            </div>
+            <button onclick="deleteCredential('{{ cred.id }}')">Delete</button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        // Base64url encoding/decoding utilities
+        function bufferToBase64url(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let str = '';
+            for (const byte of bytes) {
+                str += String.fromCharCode(byte);
+            }
+            return btoa(str)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+
+        function base64urlToBuffer(base64url) {
+            if (!base64url) {
+                console.error('base64url is undefined or empty:', base64url);
+                throw new Error('base64url string is required');
+            }
+
+            const padding = '='.repeat((4 - base64url.length % 4) % 4);
+            const base64 = base64url
+                .replace(/-/g, '+')
+                .replace(/_/g, '/') + padding;
+            const str = atob(base64);
+            const buffer = new Uint8Array(str.length);
+            for (let i = 0; i < str.length; i++) {
+                buffer[i] = str.charCodeAt(i);
+            }
+            return buffer.buffer;
+        }
+
+        // Status display function
+        function showStatus(message, isError = false, details = null) {
+            const status = document.getElementById('status');
+            let content = `<p>${message}</p>`;
+
+            if (details) {
+                content += '<div class="metadata">';
+                content += '<h4>Authentication Details</h4>';
+                for (const [key, value] of Object.entries(details)) {
+                    if (key !== 'status') {
+                        content += `<div class="metadata-item"><span class="detail-label">${key}:</span> ${value}</div>`;
+                    }
+                }
+                content += '</div>';
+            }
+
+            status.innerHTML = content;
+            status.className = isError ? 'error' : 'success';
+        }
+
+        async function registerCredential() {
+            try {
+                // Get registration options from server
+                const optionsRes = await fetch('/register');
+                const options = await optionsRes.json();
+
+                // Debug log
+                console.log('Registration options received:', options);
+
+                // Convert base64url strings to Uint8Array
+                options.publicKey.challenge = base64urlToBuffer(options.publicKey.challenge);
+                options.publicKey.user.id = base64urlToBuffer(options.publicKey.user.id);
+
+                // Debug log
+                console.log('Converted options:', options);
+
+                // Create credential
+                const credential = await navigator.credentials.create({
+                    publicKey: options.publicKey
+                });
+
+                // Debug log
+                console.log('Created credential:', credential);
+
+                // Send credential to server
+                const result = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: credential.id,
+                        rawId: bufferToBase64url(credential.rawId),
+                        response: {
+                            attestationObject: bufferToBase64url(credential.response.attestationObject),
+                            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                        },
+                        type: credential.type,
+                    })
+                });
+
+                const data = await result.json();
+                showStatus(`Registration successful! AAGUID: ${data.aaguid}`);
+                location.reload();  // Refresh to show new credential
+            } catch (error) {
+                showStatus(`Registration failed: ${error}`, true);
+                console.error('Registration error:', error);
+            }
+        }
+
+        async function authenticate() {
+            try {
+                // Get authentication options from server
+                const optionsRes = await fetch('/authenticate');
+                const options = await optionsRes.json();
+
+                if (options.error) {
+                    throw new Error(options.error);
+                }
+
+                // Convert base64url strings
+                options.challenge = base64urlToBuffer(options.challenge);
+                options.allowCredentials = options.allowCredentials.map(cred => ({
+                    ...cred,
+                    id: base64urlToBuffer(cred.id),
+                }));
+
+                // Get credential
+                const credential = await navigator.credentials.get({
+                    publicKey: options
+                });
+
+                // Send credential to server
+                const result = await fetch('/authenticate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: credential.id,
+                        rawId: bufferToBase64url(credential.rawId),
+                        response: {
+                            authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+                            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                            signature: bufferToBase64url(credential.response.signature),
+                        },
+                        type: credential.type,
+                    })
+                });
+
+                const data = await result.json();
+                showStatus('Authentication successful!', false, data);
+                location.reload();  // Refresh to update sign counts
+            } catch (error) {
+                showStatus(`Authentication failed: ${error}`, true);
+                console.error(error);
+            }
+        }
+
+        async function deleteCredential(credentialId) {
+            try {
+                const result = await fetch(`/credentials/${credentialId}`, {
+                    method: 'DELETE'
+                });
+                const data = await result.json();
+                if (data.status === 'success') {
+                    document.getElementById(`cred-${credentialId}`).remove();
+                    showStatus('Credential deleted successfully');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showStatus(`Failed to delete credential: ${error}`, true);
+            }
+        }
+    </script>
+</body>
+</html>

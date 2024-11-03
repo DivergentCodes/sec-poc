@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebAuthn ID Checker</title>
+    <script>
+    async function registerAuthenticator() {
+        try {
+            const resp = await fetch('/begin-register');
+            const options = await resp.json();
+
+            // Convert options
+            options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
+            options.publicKey.user.id = base64URLToBuffer(options.publicKey.user.id);
+            if (options.publicKey.excludeCredentials) {
+                options.publicKey.excludeCredentials = options.publicKey.excludeCredentials.map(cred => ({
+                    ...cred,
+                    id: base64URLToBuffer(cred.id),
+                }));
+            }
+
+            const credential = await navigator.credentials.create({
+                publicKey: options.publicKey
+            });
+
+            // Send credential to server
+            const result = await fetch('/finish-register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    id: credential.id,
+                    rawId: bufferToBase64URL(credential.rawId),
+                    response: {
+                        attestationObject: bufferToBase64URL(credential.response.attestationObject),
+                        clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+                    },
+                    type: credential.type
+                })
+            });
+
+            const data = await result.json();
+            document.getElementById('result').textContent =
+                `Registration successful!\n${JSON.stringify(data, null, 2)}`;
+        } catch (err) {
+            console.error(err);
+            document.getElementById('result').textContent = 'Error: ' + err.message;
+        }
+    }
+
+    async function checkAuthenticator() {
+        try {
+            const resp = await fetch('/begin-auth');
+            const options = await resp.json();
+
+            // Convert options for navigator.credentials
+            options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
+
+            const assertion = await navigator.credentials.get({
+                publicKey: options.publicKey
+            });
+
+            // Send assertion to server
+            const result = await fetch('/finish-auth', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    id: assertion.id,
+                    rawId: bufferToBase64URL(assertion.rawId),
+                    response: {
+                        authenticatorData: bufferToBase64URL(assertion.response.authenticatorData),
+                        clientDataJSON: bufferToBase64URL(assertion.response.clientDataJSON),
+                        signature: bufferToBase64URL(assertion.response.signature)
+                    },
+                    type: assertion.type
+                })
+            });
+
+            const aaguid = await result.json();
+            document.getElementById('result').textContent =
+                `AAGUID: ${aaguid.value}\nAuthenticator: ${aaguid.name}`;
+        } catch (err) {
+            console.error(err);
+            document.getElementById('result').textContent = 'Error: ' + err.message;
+        }
+    }
+
+    async function listCredentials() {
+        try {
+            const response = await fetch('/list-credentials');
+            const credentials = await response.json();
+
+            const list = credentials.map(cred => `
+                <div class="credential">
+                    <div>ID: ${cred.id}</div>
+                    <div>AAGUID: ${cred.aaguid}</div>
+                    <div>Created: ${new Date(cred.created).toLocaleString()}</div>
+                    <button onclick="removeCredential('${cred.id}')">Remove</button>
+                </div>
+            `).join('');
+
+            document.getElementById('credentials').innerHTML = list;
+        } catch (err) {
+            console.error(err);
+            document.getElementById('result').textContent = 'Error listing credentials: ' + err.message;
+        }
+    }
+
+    async function removeCredential(credentialId) {
+        try {
+            const response = await fetch('/remove-credential', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ credentialId })
+            });
+
+            if (response.ok) {
+                await listCredentials(); // Refresh the list
+                document.getElementById('result').textContent = 'Credential removed successfully';
+            } else {
+                throw new Error('Failed to remove credential');
+            }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('result').textContent = 'Error removing credential: ' + err.message;
+        }
+    }
+
+    // Base64URL helpers
+    function bufferToBase64URL(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let str = '';
+        for (const charCode of bytes) {
+            str += String.fromCharCode(charCode);
+        }
+        return btoa(str)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
+    function base64URLToBuffer(base64URL) {
+        const padding = '='.repeat((4 - base64URL.length % 4) % 4);
+        const base64 = base64URL
+            .replace(/-/g, '+')
+            .replace(/_/g, '/') + padding;
+        const str = atob(base64);
+        const buffer = new ArrayBuffer(str.length);
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < str.length; i++) {
+            bytes[i] = str.charCodeAt(i);
+        }
+        return buffer;
+    }
+    </script>
+    <style>
+        .credential {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .credential button {
+            margin-top: 5px;
+            color: white;
+            background-color: #dc3545;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebAuthn ID Checker</h1>
+    <div>
+        <button onclick="registerAuthenticator()">Register Security Key</button>
+        <button onclick="checkAuthenticator()">Check Security Key</button>
+        <button onclick="listCredentials()">List Security Keys</button>
+    </div>
+    <div id="credentials"></div>
+    <pre id="result"></pre>
+</body>
+</html>
