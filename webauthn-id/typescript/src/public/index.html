@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebAuthn TypeScript Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .credential {
+            background-color: #f8f9fa;
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success { background-color: #dff0d8; }
+        .error { background-color: #f2dede; }
+        .metadata {
+            margin-left: 20px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .metadata-item {
+            margin: 5px 0;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebAuthn TypeScript Demo</h1>
+    <div class="metadata">
+        <div class="metadata-item">
+            <span class="detail-label">Environment:</span> <span id="environment"></span>
+        </div>
+        <div class="metadata-item">
+            <span class="detail-label">RP Name:</span> <span id="rpName"></span>
+        </div>
+        <div class="metadata-item">
+            <span class="detail-label">RP ID:</span> <span id="rpID"></span>
+        </div>
+    </div>
+
+    <div>
+        <button onclick="registerCredential()">Register New Authenticator</button>
+        <button onclick="authenticate()">Authenticate</button>
+    </div>
+
+    <div id="status"></div>
+
+    <h2>Registered Authenticators</h2>
+    <div id="credentials"></div>
+
+    <script type="module">
+        import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser/dist/bundle/index.js';
+
+        // Fetch and display server configuration
+        async function fetchConfig() {
+            const response = await fetch('/config');
+            const config = await response.json();
+            document.getElementById('environment').textContent = config.environment;
+            document.getElementById('rpName').textContent = config.rpName;
+            document.getElementById('rpID').textContent = config.rpID;
+        }
+        fetchConfig();
+
+        // Status display function
+        function showStatus(message, isError = false, details = null) {
+            const status = document.getElementById('status');
+            let content = `<p>${message}</p>`;
+
+            if (details) {
+                content += '<div class="metadata">';
+                content += '<h4>Authentication Details</h4>';
+                for (const [key, value] of Object.entries(details)) {
+                    if (key !== 'status') {
+                        content += `<div class="metadata-item"><span class="detail-label">${key}:</span> ${value}</div>`;
+                    }
+                }
+                content += '</div>';
+            }
+
+            status.innerHTML = content;
+            status.className = isError ? 'error' : 'success';
+        }
+
+        window.registerCredential = async () => {
+            try {
+                const optionsResponse = await fetch('/register');
+                const optionsJSON = await optionsResponse.json();
+
+                console.log('Registration options from the server:');
+                console.dir(optionsJSON, { depth: null });
+
+                const attResp = await startRegistration({optionsJSON});
+                console.log('Registration response from the browser:');
+                console.dir(attResp, { depth: null });
+
+                const verificationResp = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(attResp)
+                });
+
+                const verificationJSON = await verificationResp.json();
+                console.log('Verification response:');
+                console.dir(verificationJSON, { depth: null });
+
+                if (verificationJSON.status === 'success') {
+                    showStatus('Registration successful!', false, verificationJSON.authenticator);
+                    location.reload();
+                } else {
+                    throw new Error(verificationJSON.message || 'Registration failed');
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                showStatus(`Registration failed: ${error.message}`, true);
+            }
+        };
+
+        window.authenticate = async () => {
+            try {
+                const optionsResponse = await fetch('/authenticate');
+                const optionsJSON = await optionsResponse.json();
+
+                console.log('Authentication options from the server:');
+                console.dir(optionsJSON, { depth: null });
+
+                const attResp = await startAuthentication({ optionsJSON });
+                console.log('Authentication response from the browser:');
+                console.dir(attResp, { depth: null });
+
+                const verificationResp = await fetch('/authenticate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(attResp)
+                });
+
+                const verificationJSON = await verificationResp.json();
+
+                if (verificationJSON.status === 'success') {
+                    showStatus('Authentication successful!', false, verificationJSON);
+                    location.reload();
+                } else {
+                    throw new Error(verificationJSON.message || 'Authentication failed');
+                }
+            } catch (error) {
+                console.error('Authentication error:', error);
+                showStatus(`Authentication failed: ${error.message}`, true);
+            }
+        };
+
+        window.deleteCredential = async (credentialId) => {
+            try {
+                const response = await fetch(`/credentials/${credentialId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    document.getElementById(`cred-${credentialId}`).remove();
+                    showStatus('Credential deleted successfully');
+                } else {
+                    throw new Error(result.message || 'Deletion failed');
+                }
+            } catch (error) {
+                showStatus(`Failed to delete credential: ${error.message}`, true);
+            }
+        };
+
+        // Load credentials on page load
+        async function loadCredentials() {
+            const response = await fetch('/credentials');
+            const credentials = await response.json();
+            const container = document.getElementById('credentials');
+
+            container.innerHTML = credentials.map(cred => `
+    <div class="credential" id="cred-${cred.credentialID}">
+        <h3>Authenticator Details</h3>
+        <div class="metadata">
+            <div class="metadata-item"><span class="detail-label">ID:</span> ${cred.credentialID}</div>
+            <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
+            <div class="metadata-item"><span class="detail-label">Created:</span> ${cred.created}</div>
+            <div class="metadata-item"><span class="detail-label">Last Used:</span> ${cred.lastUsed || 'Never'}</div>
+            <div class="metadata-item"><span class="detail-label">Sign Count:</span> ${cred.counter}</div>
+
+            <h4>Attestation Details</h4>
+            <div class="metadata-item">
+                <span class="detail-label">Type:</span> ${cred.attestationType || 'none'}
+            </div>
+            <div class="metadata-item">
+                <span class="detail-label">Verified Yubikey:</span>
+                ${cred.isVerifiedYubikey
+                    ? `<span style="color: green;">✓ Yes - ${cred.yubikeyModel}</span>
+                       <br>
+                       <span class="detail-label">Verification Method:</span>
+                       ${cred.isCryptographicallyVerified
+                           ? '<span style="color: green;">✓ Cryptographically Verified</span>'
+                           : '<span style="color: orange;">⚠ AAGUID Lookup Only</span>'
+                       }`
+                    : '<span style="color: red;">✗ No</span>'
+                }
+            </div>
+            ${cred.attestationTrustPath ? `
+            <div class="metadata-item">
+                <span class="detail-label">Trust Path:</span>
+                <ul>
+                    ${cred.attestationTrustPath.map(cert => `<li>${cert.slice(0, 64)}...</li>`).join('')}
+                </ul>
+            </div>
+            ` : ''}
+
+            <h4>Security Properties</h4>
+            <div class="metadata-item"><span class="detail-label">Backup Eligible:</span> ${cred.backupEligible}</div>
+            <div class="metadata-item"><span class="detail-label">Backup State:</span> ${cred.backupState}</div>
+            <div class="metadata-item"><span class="detail-label">User Verified:</span> ${cred.userVerified}</div>
+            <button onclick="deleteCredential('${cred.credentialID}')">Delete</button>
+        </div>
+    </div>
+`).join('');
+        }
+        loadCredentials();
+
+        // Add this helper function at the end of your script
+        function base64URLToUint8Array(base64URLString) {
+            try {
+                // Remove any whitespace and make sure we have a string
+                const cleanedString = base64URLString.toString().trim();
+
+                // Add padding if necessary
+                const padding = '='.repeat((4 - cleanedString.length % 4) % 4);
+                const base64 = (cleanedString + padding)
+                    .replace(/-/g, '+')
+                    .replace(/_/g, '/');
+
+                const rawData = window.atob(base64);
+                const buffer = new Uint8Array(rawData.length);
+
+                for (let i = 0; i < rawData.length; i++) {
+                    buffer[i] = rawData.charCodeAt(i);
+                }
+
+                return buffer;
+            } catch (error) {
+                console.error('Error converting base64URL to Uint8Array:', error);
+                console.log('Input string:', base64URLString);
+                throw error;
+            }
+        }
+    </script>
+</body>
+</html>
