@@ -1,5 +1,6 @@
 import os
 from typing import TypedDict
+from pprint import pprint
 
 class Config(TypedDict):
     RP_ID: str
@@ -8,6 +9,8 @@ class Config(TypedDict):
     FLASK_SECRET: str
 
 def get_config() -> Config:
+    pprint(os.environ)
+
     environment = os.getenv('FLASK_ENV', 'development')
 
     if environment == 'development':
