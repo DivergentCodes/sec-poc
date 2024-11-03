@@ -1,6 +1,7 @@
 import os
 from typing import TypedDict
 from pprint import pprint
+from urllib.parse import urlparse
 
 class Config(TypedDict):
     RP_ID: str
@@ -26,9 +27,13 @@ def get_config() -> Config:
     if not render_host:
         raise ValueError('RENDER_EXTERNAL_HOSTNAME environment variable is required in production')
 
+    # Extract domain from render_host
+    parsed_url = urlparse(f"https://{render_host}")
+    domain = parsed_url.netloc or render_host
+
     return {
-        'RP_ID': render_host,  # Use the full Render hostname
+        'RP_ID': domain,  # Just the domain part
         'RP_NAME': os.getenv('RP_NAME', 'WebAuthn Demo'),
-        'ORIGIN': f"https://{render_host}",  # Always use HTTPS in production
+        'ORIGIN': f"https://{domain}",  # Full URL with https
         'FLASK_SECRET': os.getenv('FLASK_SECRET', 'change-me-in-production')
     }
