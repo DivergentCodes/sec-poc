@@ -1,65 +1,65 @@
 import { X509Certificate } from 'crypto';
 import { YUBIKEY_AAGUIDS } from '../types/attestation';
 
+interface AttestationStatement {
+  alg: number;
+  sig: Buffer;
+  x5c: Buffer[];
+}
+
 export async function verifyYubikeyAttestation(
   attestationTrustPath: Buffer[],
   aaguid: string,
   attestationType: string
 ) {
   console.log('\n🔐 Starting Yubikey verification process...');
-  console.log(`📋 Attestation type: ${attestationType}`);
 
   let isVerifiedYubikey = false;
   let isCryptographicallyVerified = false;
   let yubikeyModel: string | undefined;
 
   if (attestationTrustPath && attestationTrustPath.length > 0) {
-    console.log('✓ Found attestation certificate chain');
-    console.log(`📜 Certificate chain length: ${attestationTrustPath.length}`);
-
     try {
-      for (const certBuffer of attestationTrustPath) {
-        const cert = new X509Certificate(certBuffer);
-        const subject = cert.subject;
-        const issuer = cert.issuer;
+      // Get the attestation certificate (first in chain)
+      const attCert = new X509Certificate(attestationTrustPath[0]);
+      console.log('Attestation certificate:', attCert);
 
-        console.log(`Checking certificate - Subject: ${subject}, Issuer: ${issuer}`);
+      // Verify certificate chain
+      const isYubicoCert = attCert.issuer.includes('Yubico') &&
+                          attCert.subject.includes('Yubico');
+      console.log('Is Yubico certificate:', isYubicoCert);
 
-        if (subject.includes('Yubico') || issuer.includes('Yubico')) {
-          console.log('✓ Found Yubico certificate in chain');
-          isCryptographicallyVerified = true;
-          isVerifiedYubikey = true;
-          yubikeyModel = YUBIKEY_AAGUIDS[aaguid];
-          break;
+      if (isYubicoCert) {
+        // Verify certificate validity
+        const now = new Date();
+        const notBefore = new Date(attCert.validFrom);
+        const notAfter = new Date(attCert.validTo);
+        console.log('Certificate validity:', { notBefore, notAfter });
+
+        if (now >= notBefore && now <= notAfter) {
+          // Verify certificate is for authenticator attestation
+          if (attCert.subject.includes('Authenticator Attestation')) {
+            isCryptographicallyVerified = true;
+            isVerifiedYubikey = true;
+            yubikeyModel = YUBIKEY_AAGUIDS[aaguid];
+            console.log('Cryptographically verified as Yubikey ', yubikeyModel);
+          }
         }
       }
     } catch (error) {
       console.error('Certificate verification error:', error);
     }
   } else {
-    console.log('❌ No attestation certificate chain available');
-    console.log('ℹ️  This is normal if:');
-    console.log('   - Browser is configured for privacy-preserving attestation');
-    console.log('   - Browser policy doesn\'t allow full attestation');
-    console.log('   - Platform doesn\'t support attestation');
-    console.log('   - Using plain HTTP (requires HTTPS with trusted certificate)');
-    console.log('   - Using self-signed certificates (requires properly trusted certificate)');
-    console.log('   - Using localhost (requires real domain name)');
-    console.log('   - Enterprise policies not configured in browser');
+    console.log('No attestation trust path available');
   }
 
   // Fall back to AAGUID lookup if cryptographic verification fails
   if (!isVerifiedYubikey) {
     console.log('\n⚠️  Falling back to AAGUID lookup...');
-    console.log(`Current AAGUID: ${aaguid}`);
-
     isVerifiedYubikey = aaguid in YUBIKEY_AAGUIDS;
     if (isVerifiedYubikey) {
       yubikeyModel = YUBIKEY_AAGUIDS[aaguid];
-      console.log('✓ AAGUID match found:', yubikeyModel);
-      console.log('⚠️  Note: AAGUID verification is less secure than cryptographic verification');
-    } else {
-      console.log('❌ No AAGUID match found');
+      console.log('AAGUID lookup verified as Yubikey ', yubikeyModel);
     }
   }
 

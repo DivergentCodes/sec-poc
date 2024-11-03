@@ -114,8 +114,6 @@ app.use(session({
 // Add this right after session middleware to debug
 app.use((req, res, next) => {
   console.log('Session ID:', req.sessionID);
-  console.log('Session:', req.session);
-  console.log('Cookies:', req.cookies);
 
   // Explicitly set CORS headers for every response
   res.header('Access-Control-Allow-Origin', req.headers.origin || ORIGIN);
@@ -184,15 +182,6 @@ app.post('/register', async (req, res) => {
   console.log('Received registration verification request');
   const { body } = req;
 
-  // Decode attestationObject
-  const attestationBuffer = base64url.toBuffer(body.response.attestationObject);
-  const attestationStruct = cbor.decodeFirstSync(attestationBuffer);
-  console.log('Decoded attestation object:', {
-    fmt: attestationStruct.fmt,        // Format type (e.g., 'packed', 'fido-u2f')
-    attStmt: attestationStruct.attStmt, // Attestation statement
-    authData: attestationStruct.authData // Authenticator data
-  });
-
   try {
     if (!req.session.challenge) {
       console.error('No challenge found in session');
@@ -222,16 +211,23 @@ app.post('/register', async (req, res) => {
     const { id: credentialID, publicKey: credentialPublicKey, counter } = registrationInfo.credential;
     const { aaguid } = registrationInfo;
 
-    const attestationTrustPath = (registrationInfo.attestationObject as any)?.fmt === 'packed'
-      ? (registrationInfo.attestationObject as any)?.attStmt?.x5c || []
-      : [];
-    const attestationType = (registrationInfo.attestationObject as any)?.fmt || 'none';
+    // Decode attestationObject
+    const attestationBuffer = base64url.toBuffer(body.response.attestationObject);
+    const attestationStruct = cbor.decodeFirstSync(attestationBuffer);
+    console.log('Decoded attestation object:', {
+      fmt: attestationStruct.fmt,        // Format type (e.g., 'packed', 'fido-u2f')
+      attStmt: attestationStruct.attStmt, // Attestation statement
+      authData: attestationStruct.authData // Authenticator data
+    });
 
+    const attestationTrustPath = attestationStruct.fmt === 'packed' ? attestationStruct.attStmt.x5c : [];
+    const attestationType = attestationStruct.fmt || 'none';
     const attestationResult = await verifyYubikeyAttestation(
       attestationTrustPath,
       aaguid,
       attestationType,
     );
+    console.log('Attestation result:', attestationResult);
 
     // Store the new authenticator in the database
     const {
