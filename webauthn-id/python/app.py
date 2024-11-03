@@ -93,7 +93,6 @@ def register_begin():
             authenticator_attachment="cross-platform"
         ),
         attestation="direct",  # Explicitly request direct attestation
-        attestation_formats=["packed", "fido-u2f"]  # Request both formats
     )
 
     session['current_registration_challenge'] = options.challenge
