@@ -21,6 +21,7 @@ import uuid
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from config import get_config
+import os
 
 # Initialize app with config
 config = get_config()
@@ -32,6 +33,8 @@ users = {}
 credentials = {}
 
 # Update these values for your environment
+ENVIRONMENT = config['ENVIRONMENT']
+RENDER_EXTERNAL_HOSTNAME = config['RENDER_EXTERNAL_HOSTNAME']
 RP_ID = config['RP_ID']
 RP_NAME = config['RP_NAME']
 ORIGIN = config['ORIGIN']  # Change back to http://
@@ -68,7 +71,11 @@ class RegistrationResponse:
 @app.route('/')
 def index():
     return render_template('index.html',
-                         credentials=credentials.values())
+                         credentials=credentials.values(),
+                         rp_id=RP_ID,
+                         rp_name=RP_NAME,
+                         environment=ENVIRONMENT,
+                         render_external_hostname=RENDER_EXTERNAL_HOSTNAME)
 
 @app.route('/register', methods=['GET'])
 def register_begin():
@@ -85,7 +92,7 @@ def register_begin():
             user_verification=UserVerificationRequirement.PREFERRED,
             authenticator_attachment="cross-platform"
         ),
-        attestation="direct"  # Explicitly request direct attestation
+        attestation="direct",  # Explicitly request direct attestation
     )
 
     session['current_registration_challenge'] = options.challenge
@@ -454,8 +461,14 @@ def delete_credential(credential_id):
         return jsonify({'status': 'success'})
     return jsonify({'error': 'Credential not found'}), 404
 
+@app.route('/.well-known/webauthn', methods=['GET'])
+def webauthn_config():
+    return jsonify({
+        "version": 1,
+        "registrationPolicies": ["none"],
+        "supportedAuthenticatorAttachment": ["platform", "cross-platform"]
+    }), 200, {'Content-Type': 'application/json'}
+
 if __name__ == '__main__':
-    app.run(
-        host='localhost',
-        port=5000
-    )
+    port = int(os.environ.get('PORT', 10000)) # Default on Render
+    app.run(host='0.0.0.0', port=port)

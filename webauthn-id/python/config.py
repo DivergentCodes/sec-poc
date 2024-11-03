@@ -1,5 +1,7 @@
 import os
 from typing import TypedDict
+from pprint import pprint
+from urllib.parse import urlparse
 
 class Config(TypedDict):
     RP_ID: str
@@ -8,10 +10,14 @@ class Config(TypedDict):
     FLASK_SECRET: str
 
 def get_config() -> Config:
+    pprint(os.environ)
+
     environment = os.getenv('FLASK_ENV', 'development')
 
     if environment == 'development':
         return {
+            'ENVIRONMENT': environment,
+            'RENDER_EXTERNAL_HOSTNAME': None,
             'RP_ID': 'localhost',
             'RP_NAME': 'WebAuthn Demo (Dev)',
             'ORIGIN': 'http://localhost:5000',
@@ -20,12 +26,14 @@ def get_config() -> Config:
 
     # Production settings (Render)
     render_host = os.getenv('RENDER_EXTERNAL_HOSTNAME')
-    custom_domain = os.getenv('CUSTOM_DOMAIN')
-    host = custom_domain or render_host or 'localhost'
+    if not render_host:
+        raise ValueError('RENDER_EXTERNAL_HOSTNAME environment variable is required in production')
 
     return {
-        'RP_ID': host,
+        'ENVIRONMENT': environment,
+        'RENDER_EXTERNAL_HOSTNAME': render_host,
+        'RP_ID': render_host,  # Use full subdomain
         'RP_NAME': os.getenv('RP_NAME', 'WebAuthn Demo'),
-        'ORIGIN': f"https://{host}",
+        'ORIGIN': f"https://{render_host}",
         'FLASK_SECRET': os.getenv('FLASK_SECRET', 'change-me-in-production')
     }

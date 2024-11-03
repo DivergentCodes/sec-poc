@@ -70,6 +70,20 @@
 </head>
 <body>
     <h1>WebAuthn Demo</h1>
+    <div class="metadata">
+        <div class="metadata-item">
+            <span class="detail-label">Environment:</span> {{ environment }}
+        </div>
+        <div class="metadata-item">
+            <span class="detail-label">Render External Hostname:</span> {{ render_external_hostname }}
+        </div>
+        <div class="metadata-item">
+            <span class="detail-label">RP Name:</span> {{ rp_name }}
+        </div>
+        <div class="metadata-item">
+            <span class="detail-label">RP ID:</span> {{ rp_id }}
+        </div>
+    </div>
 
     <div>
         <button onclick="registerCredential()">Register New Authenticator</button>

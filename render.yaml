@@ -12,7 +12,7 @@ services:
       - key: FLASK_ENV
         value: production
       - key: RP_NAME
-        value: WebAuthn Demo
+        value: WebAuthn Demo Root
       - key: FLASK_SECRET
         sync: false
       - key: PORT
