@@ -10,6 +10,8 @@ import {
 import { AuthenticatorTransportFuture, CredentialDeviceType } from '@simplewebauthn/types';
 import crypto from 'crypto';
 import { verifyYubikeyAttestation } from './utils/attestation';
+import base64url from 'base64url';
+import cbor from 'cbor';
 
 declare module 'express-session' {
   interface SessionData {
@@ -181,6 +183,15 @@ app.get('/register', async (req, res) => {
 app.post('/register', async (req, res) => {
   console.log('Received registration verification request');
   const { body } = req;
+
+  // Decode attestationObject
+  const attestationBuffer = base64url.toBuffer(body.response.attestationObject);
+  const attestationStruct = cbor.decodeFirstSync(attestationBuffer);
+  console.log('Decoded attestation object:', {
+    fmt: attestationStruct.fmt,        // Format type (e.g., 'packed', 'fido-u2f')
+    attStmt: attestationStruct.attStmt, // Attestation statement
+    authData: attestationStruct.authData // Authenticator data
+  });
 
   try {
     if (!req.session.challenge) {
