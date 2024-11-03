@@ -103,9 +103,26 @@ app.use(session({
   saveUninitialized: true,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
-  }
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  },
+  proxy: process.env.NODE_ENV === 'production', // Required for secure cookies in production
 }));
+// Add this right after session middleware to debug
+app.use((req, res, next) => {
+  console.log('Session ID:', req.sessionID);
+  console.log('Session:', req.session);
+  console.log('Cookies:', req.cookies);
+
+  // Explicitly set CORS headers for every response
+  res.header('Access-Control-Allow-Origin', req.headers.origin || ORIGIN);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+
+  next();
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -143,17 +160,17 @@ app.get('/register', async (req, res) => {
   });
 
   req.session.challenge = options.challenge;
-  console.log('Challenge stored in session');
 
-  req.session.save((err) => {
-    if (err) {
-      console.error('Failed to save session:', err);
-      res.status(500).json({ status: 'error', message: 'Failed to save session' });
-      return;
-    }
-    console.log('Session saved successfully, sending options to client');
-    res.json(options);
+  // Force session save and wait for it
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) reject(err);
+      else resolve(true);
+    });
   });
+  console.log('Set-Cookie header:', res.getHeader('set-cookie'));
+  console.log('Session saved successfully, sending options to client');
+  res.json(options);
 });
 
 /**
