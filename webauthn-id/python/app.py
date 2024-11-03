@@ -92,7 +92,8 @@ def register_begin():
             user_verification=UserVerificationRequirement.PREFERRED,
             authenticator_attachment="cross-platform"
         ),
-        attestation="direct"  # Explicitly request direct attestation
+        attestation="direct",  # Explicitly request direct attestation
+        attestation_formats=["packed", "fido-u2f"]  # Request both formats
     )
 
     session['current_registration_challenge'] = options.challenge
