@@ -16,6 +16,8 @@ def get_config() -> Config:
 
     if environment == 'development':
         return {
+            'ENVIRONMENT': environment,
+            'RENDER_EXTERNAL_HOSTNAME': None,
             'RP_ID': 'localhost',
             'RP_NAME': 'WebAuthn Demo (Dev)',
             'ORIGIN': 'http://localhost:5000',
