@@ -27,15 +27,9 @@ def get_config() -> Config:
     if not render_host:
         raise ValueError('RENDER_EXTERNAL_HOSTNAME environment variable is required in production')
 
-    # Extract the onrender.com domain
-    if '.onrender.com' in render_host:
-        domain = 'onrender.com'  # Use the top-level domain for RP_ID
-    else:
-        domain = render_host
-
     return {
-        'RP_ID': domain,
+        'RP_ID': render_host,  # Use full subdomain
         'RP_NAME': os.getenv('RP_NAME', 'WebAuthn Demo'),
-        'ORIGIN': f"https://{render_host}",  # Full hostname for origin
+        'ORIGIN': f"https://{render_host}",
         'FLASK_SECRET': os.getenv('FLASK_SECRET', 'change-me-in-production')
     }

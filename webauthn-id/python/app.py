@@ -69,7 +69,9 @@ class RegistrationResponse:
 @app.route('/')
 def index():
     return render_template('index.html',
-                         credentials=credentials.values())
+                         credentials=credentials.values(),
+                         rp_id=RP_ID,
+                         rp_name=RP_NAME)
 
 @app.route('/register', methods=['GET'])
 def register_begin():
