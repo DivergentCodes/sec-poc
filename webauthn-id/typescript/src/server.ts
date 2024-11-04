@@ -2,87 +2,19 @@ import express from 'express';
 import session from 'express-session';
 import path from 'path';
 import {
-  generateRegistrationOptions,
   verifyRegistrationResponse,
-  generateAuthenticationOptions,
   verifyAuthenticationResponse,
+  VerifyAuthenticationResponseOpts,
 } from '@simplewebauthn/server';
-import { AuthenticatorTransportFuture, CredentialDeviceType } from '@simplewebauthn/types';
-import crypto from 'crypto';
-import { verifyYubikeyAttestation } from './utils/attestation';
-import base64url from 'base64url';
-import cbor from 'cbor';
+import { parseFidoMetadataJWT } from './utils/fido-mds';
+import { AuthenticatorModel, theUser, UserModel } from './types/models';
+import { handleKeyRegistrationVerification, keyRegistrationRequest } from './utils/key-registration';
+import { keyAuthenticationRequest, keyAuthenticationVerification } from './utils/key-authentication';
 
 declare module 'express-session' {
   interface SessionData {
     challenge: string;
   }
-}
-
-type UserModel = {
-  id: any;
-  name: string;
-};
-
-const theUser: UserModel = {
-  id: 'test-user',
-  name: 'test@example.com',
-};
-
-type AuthenticatorModel = {
-  status: string;
-  credentialID: Base64URLString;
-  credentialPublicKey: Base64URLString;
-  aaguid: string;
-  signCount: number;
-  previousSignCount: number;
-  backupState: boolean;
-  backupEligible: boolean;
-  userVerified: boolean;
-  lastUsed: string;
-
-  // SQL: Store raw bytes as `BYTEA`/`BLOB`/etc...
-  //      Caution: Node ORM's may map this to a Buffer on retrieval,
-  //      convert to Uint8Array as necessary
-  publicKey: Uint8Array;
-
-  // SQL: Foreign Key to an instance of your internal user model
-  user: UserModel;
-
-  // SQL: Store as `TEXT`. Index this column. A UNIQUE constraint on
-  //      (webAuthnUserID + user) also achieves maximum user privacy
-  webauthnUserID: Base64URLString;
-
-  // SQL: Consider `BIGINT` since some authenticators return atomic timestamps as counters
-  counter: number;
-  // SQL: `VARCHAR(32)` or similar, longest possible value is currently 12 characters
-  // Ex: 'singleDevice' | 'multiDevice'
-
-  deviceType: CredentialDeviceType;
-  // SQL: `BOOL` or whatever similar type is supported
-  backedUp: boolean;
-  // SQL: `VARCHAR(255)` and store string array as a CSV string
-  // Ex: ['ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb']
-  transports?: AuthenticatorTransportFuture[];
-
-  isVerifiedYubikey?: boolean;
-  isCryptographicallyVerified?: boolean;
-  yubikeyModel?: string;
-  attestationType?: string;
-  attestationTrustPath?: string[];
-  verificationMethod?: string;
-};
-
-interface AuthenticationDetails {
-  status: string;
-  aaguid: string;
-  signCount: number;
-  previousSignCount: number;
-  credentialId: string;
-  backupState: boolean;
-  backupEligible: boolean;
-  userVerified: boolean;
-  authenticationTime: string;
 }
 
 const app = express();
@@ -93,7 +25,6 @@ const RP_NAME = process.env.RP_NAME || 'WebAuthn TypeScript Demo Default';
 const ORIGIN = process.env.ORIGIN || `http://${RP_ID}:${PORT}`;
 
 // In-memory storage - replace with database in production
-const users: Map<string, UserModel> = new Map();
 const authenticators: Map<string, AuthenticatorModel> = new Map();
 
 // Middleware
@@ -136,29 +67,9 @@ app.get('/', (req, res) => {
  */
 app.get('/register', async (req, res) => {
   console.log('Starting registration process...');
-
   console.log(`Generating registration options for user: ${theUser.name}`);
-  const options = await generateRegistrationOptions({
-    rpName: RP_NAME,
-    rpID: RP_ID,
-    userID: Buffer.from(theUser.id),
-    userName: theUser.name,
-    challenge: Buffer.from(crypto.randomBytes(32)),
-    attestationType: 'direct',
-    authenticatorSelection: {
-      userVerification: 'preferred',
-      authenticatorAttachment: 'cross-platform',
-    }
-  });
 
-  console.log('Registration options generated:', {
-    rpName: RP_NAME,
-    rpID: RP_ID,
-    userId: theUser.id,
-    userName: theUser.name,
-    challengeLength: options.challenge.length,
-  });
-
+  const options = await keyRegistrationRequest(RP_NAME, RP_ID, theUser);
   req.session.challenge = options.challenge;
 
   // Force session save and wait for it
@@ -168,6 +79,7 @@ app.get('/register', async (req, res) => {
       else resolve(true);
     });
   });
+
   console.log('Set-Cookie header:', res.getHeader('set-cookie'));
   console.log('Session saved successfully, sending options to client');
   res.json(options);
@@ -188,100 +100,24 @@ app.post('/register', async (req, res) => {
       throw new Error('Missing challenge in session');
     }
 
-    console.log('Verifying registration response...');
-    console.log('Expected origin:', ORIGIN);
-    console.log('Expected RPID:', RP_ID);
-
-    // Verify the registration response
-    const verification = await verifyRegistrationResponse({
-      response: body,
-      expectedChallenge: req.session.challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-    });
-
-    const { verified, registrationInfo } = verification;
-    console.log('Registration verification result:', { verified });
-
-    if (!verified || !registrationInfo) {
-      console.error('Registration verification failed');
-      throw new Error('Registration verification failed');
-    }
-
-    const { id: credentialID, publicKey: credentialPublicKey, counter } = registrationInfo.credential;
-    const { aaguid } = registrationInfo;
-
-    // Decode attestationObject
-    const attestationBuffer = base64url.toBuffer(body.response.attestationObject);
-    const attestationStruct = cbor.decodeFirstSync(attestationBuffer);
-    console.log('Decoded attestation object:', {
-      fmt: attestationStruct.fmt,        // Format type (e.g., 'packed', 'fido-u2f')
-      attStmt: attestationStruct.attStmt, // Attestation statement
-      authData: attestationStruct.authData // Authenticator data
-    });
-
-    const attestationTrustPath = attestationStruct.fmt === 'packed' ? attestationStruct.attStmt.x5c : [];
-    const attestationType = attestationStruct.fmt || 'none';
-    const attestationResult = await verifyYubikeyAttestation(
-      attestationTrustPath,
-      aaguid,
-      attestationType,
+    const authenticator = await handleKeyRegistrationVerification(
+      body,
+      req.session.challenge,
+      ORIGIN,
+      RP_ID,
+      theUser
     );
-    console.log('Attestation result:', attestationResult);
 
-    // Store the new authenticator in the database
-    const {
-      credential,
-      credentialDeviceType,
-      credentialBackedUp,
-    } = registrationInfo;
-
-    const authenticator: AuthenticatorModel = {
-      status: 'success',
-      // A unique identifier for the credential
-      credentialID,
-      credentialPublicKey: Buffer.from(credentialPublicKey).toString('base64url'),
-      aaguid,
-      signCount: counter,
-      previousSignCount: 0,
-      backupState: credentialBackedUp,
-      backupEligible: credentialBackedUp,
-      userVerified: false,
-      lastUsed: new Date().toISOString(),
-      user: {
-        id: theUser.id,
-        name: theUser.name,
-      },
-      webauthnUserID: theUser.id,
-      publicKey: credentialPublicKey,
-      // The number of times the authenticator has been used on this site so far
-      counter,
-
-      // How the browser can talk with this credential's authenticator
-      transports: credential.transports,
-      // Whether the passkey is single-device or multi-device
-      deviceType: credentialDeviceType,
-      // Whether the passkey has been backed up in some way
-      backedUp: credentialBackedUp,
-
-      ...attestationResult,
-    };
     authenticators.set(authenticator.credentialID, authenticator);
     console.log('Saved authenticator:', authenticator);
 
-    // Send the new authenticator details to the client
-    res.json({
-      status: 'success',
-      authenticator: authenticator,
-    });
+    res.json({ status: 'success', authenticator: authenticator });
   } catch (error: any) {
     console.error('Registration error:', error);
     console.error('Error stack:', error.stack);
     res.status(400).json({ status: 'error', message: error.message });
   }
 
-  // Clean up
-  console.log('Clearing challenge from session');
   req.session.challenge = undefined;
 });
 
@@ -289,99 +125,57 @@ app.post('/register', async (req, res) => {
  * Handles the authentication initiation request
  * @param req - The request object
  * @param res - The response object
+ * @returns The authentication options for the browser to pass to the authenticator
  */
 app.get('/authenticate', async (req, res) => {
-    console.log('Received authentication initiation request');
-    console.log('Authenticators registered:', authenticators.size);
+  console.log('Received authentication initiation request');
 
-    // Check if there are any authenticators registered
-    if (authenticators.size === 0) {
-        console.error('No authenticators registered yet');
-        res.status(400).json({ error: 'No authenticators registered yet' });
-        return;
-    }
-
-    const userAuthenticators = Array.from(authenticators.values());
-    const options: PublicKeyCredentialRequestOptionsJSON = await generateAuthenticationOptions({
-      rpID: RP_ID,
-      // Require users to use a previously-registered authenticator
-      allowCredentials: userAuthenticators.map(authenticator => ({
-        id: authenticator.credentialID,
-        transports: authenticator.transports,
-        type: 'public-key',
-      })),
-    });
-
-    // Generate authentication options
-    console.log('Authentication options:', options);
-
-    // Store the challenge in the session
+  try {
+    const options = await keyAuthenticationRequest(RP_ID, authenticators);
     req.session.challenge = options.challenge;
     res.json(options);
+  } catch (error: any) {
+    console.error('Authentication error:', error);
+    res.status(400).json({ error: error.message });
+  }
 });
 
 /**
  * Handles the authentication verification request
  * @param req - The request object
  * @param res - The response object
+ * @returns The verified authenticator object with all metadata
  */
 app.post('/authenticate', async (req, res) => {
-    const { body } = req;
-    console.log('Received authentication verification request');
-    console.dir(body, { depth: null });
+  const { body } = req;
+  console.log('Received authentication verification request');
+  console.dir(body, { depth: null });
 
-    try {
-        if (!req.session.challenge) {
-          console.error('Challenge not found in session');
-          throw new Error('Challenge not found in session');
-        }
-
-        const authenticator = authenticators.get(body.id);
-        if (!authenticator) {
-            console.error('Authenticator not found');
-            throw new Error('Authenticator not found');
-        }
-
-        // Verify the authentication response
-        const verificationParams = {
-            response: body,
-            expectedChallenge: req.session.challenge,
-            expectedOrigin: ORIGIN,
-            expectedRPID: RP_ID,
-            requireUserVerification: true,
-            credential: {
-                id: authenticator.credentialID,
-                publicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
-                counter: authenticator.counter,
-            },
-        }
-        console.log('Authentication verification parameters:');
-        console.dir(verificationParams, { depth: null });
-        const verificationResult = await verifyAuthenticationResponse(verificationParams);
-        console.log('Authentication verification result:');
-        console.dir(verificationResult, { depth: null });
-        const { verified, authenticationInfo } = verificationResult;
-
-        if (verified) {
-          console.log('Authentication successful, updating authenticator data');
-
-          // Update authenticator data
-          authenticator.previousSignCount = authenticator.counter;
-          authenticator.counter = authenticationInfo.newCounter;
-          authenticator.userVerified = authenticationInfo.userVerified;
-          authenticator.deviceType = authenticationInfo.credentialDeviceType;
-          authenticator.backedUp = authenticationInfo.credentialBackedUp;
-          authenticator.lastUsed = new Date().toISOString();
-
-          console.log('Authentication details:');
-          console.dir(authenticator, { depth: null });
-
-          res.json(authenticator);
-        }
-    } catch (error: any) {
-        console.error('Authentication error:', error);
-        res.status(400).json({ status: 'error', message: error.message });
+  try {
+    if (!req.session.challenge) {
+      console.error('Challenge not found in session');
+      throw new Error('Challenge not found in session');
     }
+
+    const authenticator = authenticators.get(body.id);
+    if (!authenticator) {
+      console.error('Authenticator not found');
+      throw new Error('Authenticator not found');
+    }
+
+    const updatedAuthenticator = await keyAuthenticationVerification(
+      body,
+      req.session.challenge,
+      ORIGIN,
+      RP_ID,
+      authenticator
+    );
+
+    res.json(updatedAuthenticator);
+  } catch (error: any) {
+    console.error('Authentication error:', error);
+    res.status(400).json({ status: 'error', message: error.message });
+  }
 });
 
 /**
@@ -421,6 +215,52 @@ app.get('/config', (req, res) => {
         rpName: RP_NAME,
         origin: ORIGIN,
     });
+});
+
+/**
+ * Handles the FIDO metadata request with AAGUID as a query parameter
+ * @param req - The request object
+ * @param res - The response object
+ */
+app.get('/fido-metadata', (req: express.Request, res: express.Response) => {
+  const aaguid = req.query.aaguid as string;
+
+  if (!aaguid) {
+    res.status(400).json({
+      status: 'error',
+      message: 'AAGUID query parameter is required'
+    });
+    return;
+  }
+
+  console.log(`Fetching FIDO metadata for AAGUID: ${aaguid}`);
+
+  try {
+    // Parse the metadata JWT if not already parsed
+    const entries = parseFidoMetadataJWT();
+
+    // Look up the specific AAGUID
+    const metadata = entries.find(entry => entry.aaguid === aaguid);
+
+    if (metadata) {
+      res.json({
+        status: 'success',
+        metadata
+      });
+    } else {
+      res.status(404).json({
+        status: 'error',
+        message: 'No metadata found for provided AAGUID'
+      });
+    }
+  } catch (error: any) {
+    console.error('Error fetching FIDO metadata:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch FIDO metadata',
+      error: error.message
+    });
+  }
 });
 
 // Start the server

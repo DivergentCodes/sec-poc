@@ -1,9 +1,16 @@
+import { AttestationStatement } from "../utils/attestation";
+
 export interface VerificationResult {
   isVerifiedYubikey: boolean;
   isCryptographicallyVerified: boolean;
   yubikeyModel?: string;
   attestationType: string;
   attestationTrustPath?: string[];
+}
+
+export type AttestationStruct = {
+  attStmt: AttestationStatement;
+  fmt: string;
 }
 
 export const YUBIKEY_AAGUIDS: Record<string, string> = {

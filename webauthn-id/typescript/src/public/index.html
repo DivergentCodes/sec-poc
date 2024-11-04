@@ -195,18 +195,43 @@
 
             container.innerHTML = credentials.map(cred => `
     <div class="credential" id="cred-${cred.credentialID}">
-        <h3>Authenticator Details</h3>
+        <h3>Key ID: <code>${cred.credentialID}</code></h3>
         <div class="metadata">
-            <div class="metadata-item"><span class="detail-label">ID:</span> ${cred.credentialID}</div>
+
+
+            <h4>Static Metadata</h4>
             <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
+
+
+            <h4>Dynamic Metadata</h4>
             <div class="metadata-item"><span class="detail-label">Created:</span> ${cred.created}</div>
             <div class="metadata-item"><span class="detail-label">Last Used:</span> ${cred.lastUsed || 'Never'}</div>
             <div class="metadata-item"><span class="detail-label">Sign Count:</span> ${cred.counter}</div>
 
+
             <h4>Attestation Details</h4>
+            ${cred.fidoMetadata?.metadataStatement?.icon ? `
+            <div class="metadata-item">
+                <img src="${cred.fidoMetadata.metadataStatement.icon}" alt="Authenticator Icon" style="max-width: 64px; margin-top: 5px;">
+            </div>
+            ` : ''}
             <div class="metadata-item">
                 <span class="detail-label">Type:</span> ${cred.attestationType || 'none'}
             </div>
+
+
+            <h4>Authenticator Checks</h4>
+            <div class="metadata-item"><span class="detail-label">AAGUID Recognized:</span> ${cred.aaguidRecognized}</div>
+            <div class="metadata-item"><span class="detail-label">AAGUID matches FIDO MDS:</span> ${cred.aaguidInFidoMds}</div>
+            <div class="metadata-item"><span class="detail-label">Certificate Present:</span> ${cred.certPresent}</div>
+            <div class="metadata-item"><span class="detail-label">AAGUID in Certificate:</span> ${cred.aaguidInCert}</div>
+            <div class="metadata-item"><span class="detail-label">Certificate is Valid:</span> ${cred.certValid}</div>
+            <div class="metadata-item"><span class="detail-label">Certificate is Trusted:</span> ${cred.certTrusted}</div>
+            <div class="metadata-item"><span class="detail-label">Cert Chain is Valid:</span> ${cred.certChainValid}</div>
+            <div class="metadata-item"><span class="detail-label">Certificate matches FIDO MDS:</span> ${cred.certInFidoMds}</div>
+
+
+            <h4>SCRATCH</h4>
             <div class="metadata-item">
                 <span class="detail-label">Verified Yubikey:</span>
                 ${cred.isVerifiedYubikey
