@@ -106,7 +106,8 @@ function extractCertChain(attestationObject: string): Buffer[] {
 }
 
 /**
- * Validate the certificate chain without checking trusted roots
+ * Validate the certificate chain without checking trusted roots.
+ * The authenticator's leaf certificate's signature can be verified using the root's public key.
  */
 export function validateCertificateChain(attestationObject: string): CertificateChainValidationResult {
   try {
