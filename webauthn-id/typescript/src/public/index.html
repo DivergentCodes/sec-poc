@@ -221,37 +221,53 @@
 
 
             <h4>Authenticator Checks</h4>
-            <div class="metadata-item"><span class="detail-label">AAGUID Recognized:</span> ${cred.aaguidRecognized}</div>
-            <div class="metadata-item"><span class="detail-label">AAGUID matches FIDO MDS:</span> ${cred.aaguidInFidoMds}</div>
-            <div class="metadata-item"><span class="detail-label">Certificate Present:</span> ${cred.certPresent}</div>
-            <div class="metadata-item"><span class="detail-label">AAGUID in Certificate:</span> ${cred.aaguidInCert}</div>
-            <div class="metadata-item"><span class="detail-label">Certificate is Valid:</span> ${cred.certValid}</div>
-            <div class="metadata-item"><span class="detail-label">Certificate is Trusted:</span> ${cred.certTrusted}</div>
-            <div class="metadata-item"><span class="detail-label">Cert Chain is Valid:</span> ${cred.certChainValid}</div>
-            <div class="metadata-item"><span class="detail-label">Certificate matches FIDO MDS:</span> ${cred.certInFidoMds}</div>
-
-
-            <h4>SCRATCH</h4>
             <div class="metadata-item">
-                <span class="detail-label">Verified Yubikey:</span>
-                ${cred.isVerifiedYubikey
-                    ? `<span style="color: green;">✓ Yes - ${cred.yubikeyModel}</span>
-                       <br>
-                       <span class="detail-label">Verification Method:</span>
-                       ${cred.isCryptographicallyVerified
-                           ? '<span style="color: green;">✓ Cryptographically Verified</span>'
-                           : '<span style="color: orange;">⚠ AAGUID Lookup Only</span>'
-                       }`
-                    : '<span style="color: red;">✗ No</span>'
-                }
+                <span class="detail-label">AAGUID Recognized:</span>
+                <span style="color: ${cred.authenticatorChecks.recognizedAAGUID ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.recognizedAAGUID ? '✓' : '✗'}
+                </span>
             </div>
-            ${cred.attestationTrustPath ? `
             <div class="metadata-item">
-                <span class="detail-label">Trust Path:</span>
-                <ul>
-                    ${cred.attestationTrustPath.map(cert => `<li>${cert.slice(0, 64)}...</li>`).join('')}
-                </ul>
+                <span class="detail-label">AAGUID in FIDO MDS:</span>
+                <span style="color: ${cred.authenticatorChecks.fidoMdsAAGUID ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.fidoMdsAAGUID ? '✓' : '✗'}
+                </span>
             </div>
+            <div class="metadata-item">
+                <span class="detail-label">Certificate Present:</span>
+                <span style="color: ${cred.authenticatorChecks.certPresent ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.certPresent ? '✓' : '✗'}
+                </span>
+            </div>
+            <div class="metadata-item">
+                <span class="detail-label">Certificate Valid:</span>
+                <span style="color: ${cred.authenticatorChecks.certValid ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.certValid ? '✓' : '✗'}
+                </span>
+            </div>
+            <div class="metadata-item">
+                <span class="detail-label">Certificate Chain Valid:</span>
+                <span style="color: ${cred.authenticatorChecks.certChainValid ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.certChainValid ? '✓' : '✗'}
+                </span>
+            </div>
+            <div class="metadata-item">
+                <span class="detail-label">Certificate Valid against FIDO Trusted Root:</span>
+                <span style="color: ${cred.authenticatorChecks.fidoRootCertValid ? 'green' : 'red'}">
+                    ${cred.authenticatorChecks.fidoRootCertValid ? '✓' : '✗'}
+                </span>
+            </div>
+            ${cred.certChainValidation?.error ? `
+                <div class="metadata-item">
+                    <span class="detail-label">Chain Validation Error:</span>
+                    <span style="color: red">${cred.certChainValidation.error}</span>
+                </div>
+            ` : ''}
+            ${cred.fidoRootCertValidation?.error ? `
+                <div class="metadata-item">
+                    <span class="detail-label">FIDO Root Validation Error:</span>
+                    <span style="color: red">${cred.fidoRootCertValidation.error}</span>
+                </div>
             ` : ''}
 
             <h4>Security Properties</h4>
