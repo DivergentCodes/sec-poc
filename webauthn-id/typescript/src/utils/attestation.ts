@@ -26,13 +26,19 @@ export function isRecognizedAAGUID(aaguid: string): boolean {
 }
 
 /**
- * Check if the attestation object has a certificate at all
- * @param attestationObject - The attestation object
- * @returns True if the attestation object has a certificate, false otherwise
+ * Check if the attestation object contains a certificate
  */
 export function hasCertificate(attestationObject: string): boolean {
-  const attestationStruct = decodeAttestationObject(attestationObject);
-  return attestationStruct.attStmt.x5c.length > 0;
+  try {
+    const decodedAttestation = decodeAttestationObject(attestationObject);
+    const x5c = decodedAttestation?.attStmt?.x5c;
+
+    // Check if x5c exists and is an array with at least one certificate
+    return Array.isArray(x5c) && x5c.length > 0;
+  } catch (error) {
+    console.error('Error checking for certificate:', error);
+    return false;
+  }
 }
 
 /**
