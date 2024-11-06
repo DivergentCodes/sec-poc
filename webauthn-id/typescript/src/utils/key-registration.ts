@@ -32,8 +32,10 @@ export async function keyRegistrationRequest(
     challenge: Buffer.from(crypto.randomBytes(32)),
     attestationType: 'direct',
     authenticatorSelection: {
+      //authenticatorAttachment: 'cross-platform',
+      requireResidentKey: false,
+      residentKey: 'preferred',
       userVerification: 'preferred',
-      authenticatorAttachment: 'cross-platform',
     }
   }
   const options = await generateRegistrationOptions(genOptions);

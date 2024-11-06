@@ -1,4 +1,5 @@
-import { generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
+import crypto from 'crypto';
+import { generateAuthenticationOptions, GenerateAuthenticationOptionsOpts, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { AuthenticatorModel } from '../types/models';
 
 /**
@@ -17,16 +18,20 @@ export async function keyAuthenticationRequest(
   }
 
   const userAuthenticators = Array.from(authenticators.values());
-  const options = await generateAuthenticationOptions({
+  const genOptions: GenerateAuthenticationOptionsOpts = {
     rpID,
     allowCredentials: userAuthenticators.map(authenticator => ({
       id: authenticator.credentialID,
       transports: authenticator.transports,
       type: 'public-key',
     })),
-  });
+    challenge: Buffer.from(crypto.randomBytes(32)),
+    userVerification: 'preferred',
+  }
+  const options = await generateAuthenticationOptions(genOptions);
 
-  console.log('Authentication options:', options);
+  console.log('Authentication options:');
+  console.dir(options, { depth: null });
   return options;
 }
 
