@@ -200,15 +200,19 @@
 
 
             <h4>Authenticator Identification</h4>
-            <div class="metadata-item"><span class="detail-label">Name:</span> ${cred.recognizedAAGUID?.name}</div>
-            ${cred.recognizedAAGUID?.icon_light? `
-            <div class="metadata-item">
-                <img src="${cred.recognizedAAGUID.icon_light}" alt="Authenticator Icon" style="max-width: 64px; margin-top: 5px;">
-            </div>
-            ` : ''}
-            <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
-            <div class="metadata-item">
-                <span class="detail-label">Attestation Type:</span> ${cred.attestationType || 'none'}
+            <div style="display: flex; justify-content: flex-start; align-items: flex-start;">
+                <div>
+                    <div class="metadata-item"><span class="detail-label">Name:</span> ${cred.recognizedAAGUID?.name}</div>
+                    <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
+                    <div class="metadata-item">
+                        <span class="detail-label">Attestation Type:</span> ${cred.attestationType || 'none'}
+                    </div>
+                </div>
+                ${cred.recognizedAAGUID?.icon_light? `
+                <div class="metadata-item" style="margin-left: 16px; flex-shrink: 0;">
+                    <img src="${cred.recognizedAAGUID.icon_light}" alt="Authenticator Icon" style="max-width: 64px;">
+                </div>
+                ` : ''}
             </div>
 
 
