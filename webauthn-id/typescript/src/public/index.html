@@ -215,14 +215,7 @@
                 ` : ''}
             </div>
 
-
-            <h4>Dynamic Metadata</h4>
-            <div class="metadata-item"><span class="detail-label">Created:</span> ${cred.created}</div>
-            <div class="metadata-item"><span class="detail-label">Last Used:</span> ${cred.lastUsed || 'Never'}</div>
-            <div class="metadata-item"><span class="detail-label">Sign Count:</span> ${cred.counter}</div>
-
-
-            <h4>Authenticator Checks</h4>
+            <h4>Authenticator Attestation Capabilities</h4>
             <div class="metadata-item">
                 <span style="color: ${cred.authenticatorChecks.recognizedAAGUID ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
                     ${cred.authenticatorChecks.recognizedAAGUID ? '✔' : '✘'}
@@ -278,6 +271,12 @@
             <div class="metadata-item"><span class="detail-label">Backup Eligible:</span> ${cred.backupEligible}</div>
             <div class="metadata-item"><span class="detail-label">Backup State:</span> ${cred.backupState}</div>
             <div class="metadata-item"><span class="detail-label">User Verified:</span> ${cred.userVerified}</div>
+
+            <h4>Usage Details</h4>
+            <div class="metadata-item"><span class="detail-label">Created:</span> ${cred.created}</div>
+            <div class="metadata-item"><span class="detail-label">Last Used:</span> ${cred.lastUsed || 'Never'}</div>
+            <div class="metadata-item"><span class="detail-label">Sign Count:</span> ${cred.counter}</div>
+
             <button onclick="deleteCredential('${cred.credentialID}')">Delete</button>
         </div>
     </div>
