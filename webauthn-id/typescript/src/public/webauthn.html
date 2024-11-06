@@ -8,7 +8,13 @@
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
+            transition: padding-top 0.3s ease-out;
         }
+
+        body.has-banner {
+            padding-top: 80px;
+        }
+
         .credential {
             background-color: #f8f9fa;
             margin: 15px 0;
@@ -201,9 +207,73 @@
             flex-grow: 1;
             min-width: 0;
         }
+
+        .success-banner {
+            background-color: #dff0d8;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dismiss-button {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+        }
+
+        .banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        .success-banner {
+            background-color: #22c55e;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .dismiss-button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0 8px;
+            margin-left: 16px;
+            width: auto;
+        }
+
+        .dismiss-button:hover {
+            opacity: 0.8;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-100%);
+            }
+            to {
+                transform: translateY(0);
+            }
+        }
     </style>
 </head>
 <body>
+    <div id="successBanner" class="banner success-banner" style="display: none;">
+        <span id="successMessage"></span>
+        <button onclick="dismissBanner()" class="dismiss-button">×</button>
+    </div>
     <h1>WebAuthn/Passkey Demo</h1>
 
     <div class="layout-container">
@@ -269,7 +339,7 @@
         <div class="right-column">
             <h2>Registered Authenticators</h2>
             <div class="action-buttons">
-                <button onclick="registerCredential()">Register New Authenticator</button>
+                <button onclick="registerCredential()">Register Authenticator</button>
                 <button onclick="authenticate()">Authenticate</button>
             </div>
             <div id="credentials"></div>
@@ -319,6 +389,34 @@
             status.className = isError ? 'error' : 'success';
         }
 
+        function showSuccessBanner(message) {
+            localStorage.setItem('successMessage', message);
+            displayBannerIfNeeded();
+        }
+
+        function displayBannerIfNeeded() {
+            const message = localStorage.getItem('successMessage');
+            if (message) {
+                const banner = document.getElementById('successBanner');
+                const messageElement = document.getElementById('successMessage');
+                messageElement.textContent = message;
+                banner.style.display = 'flex';
+                document.body.classList.add('has-banner');
+
+                // Auto-dismiss after 5 seconds
+                setTimeout(() => {
+                    dismissBanner();
+                }, 5000);
+            }
+        }
+
+        window.dismissBanner = () => {
+            const banner = document.getElementById('successBanner');
+            banner.style.display = 'none';
+            document.body.classList.remove('has-banner');
+            localStorage.removeItem('successMessage');
+        };
+
         window.registerCredential = async () => {
             try {
                 const userVerification = document.getElementById('userVerification').value;
@@ -347,7 +445,7 @@
                 console.dir(verificationJSON, { depth: null });
 
                 if (verificationJSON.status === 'success') {
-                    showStatus('Registration successful!', false, verificationJSON.authenticator);
+                    showSuccessBanner('Registration successful!');
                     location.reload();
                 } else {
                     throw new Error(verificationJSON.message || 'Registration failed');
@@ -383,7 +481,7 @@
                 const verificationJSON = await verificationResp.json();
 
                 if (verificationJSON.status === 'success') {
-                    showStatus('Authentication successful!', false, verificationJSON);
+                    showSuccessBanner('Authentication successful!');
                     location.reload();
                 } else {
                     throw new Error(verificationJSON.message || 'Authentication failed');
@@ -567,6 +665,11 @@
                 showStatus(`Failed to update user verification: ${error.message}`, true);
             }
         };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            displayBannerIfNeeded();
+            // ... other initialization code ...
+        });
     </script>
 </body>
 </html>
