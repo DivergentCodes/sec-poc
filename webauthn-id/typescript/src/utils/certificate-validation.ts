@@ -1,7 +1,6 @@
 import { X509Certificate } from 'crypto';
 import base64url from 'base64url';
 import cbor from 'cbor';
-import { decodeAttestationObject } from './attestation';
 import { FidoMetadataEntry } from './fido-mds';
 
 export interface CertificateChainValidationResult {

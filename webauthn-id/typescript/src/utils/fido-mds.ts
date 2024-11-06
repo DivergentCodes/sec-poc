@@ -89,7 +89,7 @@ let metadataEntries: FidoMetadataEntry[] = [];
  */
 export function parseFidoMetadataJWT(): FidoMetadataEntry[] {
   // Read the JWT file
-  const jwtPath = path.join(__dirname, 'fido-mds.jwt');
+  const jwtPath = path.join(__dirname, '../../data/fido-mds.jwt');
   const jwt = fs.readFileSync(jwtPath, 'utf8');
   const [header, payload, signature] = jwt.split('.');
   const decodedPayload = Buffer.from(payload, 'base64url').toString('utf8');

@@ -2,7 +2,6 @@ import { X509Certificate } from 'crypto';
 import { AttestationStruct, YUBIKEY_AAGUIDS } from '../types/attestation';
 import base64url from 'base64url';
 import cbor from 'cbor';
-import { getFidoMetadataEntryByAAGUID } from './fido-mds';
 
 export interface AttestationStatement {
   alg: number;
