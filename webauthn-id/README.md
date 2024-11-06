@@ -1,18 +1,32 @@
 # WebAuthN Authenticator Identification and Verification
 
-This is a simple PoC that shows WebAuthn authenticator metadata and
-how to identify authenticators using the AAGUID.
+This is a simple PoC that shows WebAuthn authenticator metadata.
+It shows how to identify and verify authenticators using the AAGUID
+and certificate information.
 
 ## Checks Against WebAuthN Authenticators
 
-1. AAGUID Recognized
-2. AAGUID in FIDO MDS
+1. AAGUID in community maintained lists
+2. AAGUID in FIDO metadata service
 3. Certificate Present
 4. AAGUID in Certificate
 5. Certificate is Valid
-6. Certificate is Trusted
 6. Cert Chain is Valid
 7. Certificate matches FIDO MDS
+
+## Screenshots
+
+### Chrome on Mac
+<img src="./screenshots/webauthn-chrome-mac.png" width="500" alt="Chrome">
+
+### iCloud Keychain
+<img src="./screenshots/webauthn-icloud-keychain.png" width="500" alt="iCloud Keychain">
+
+### 1Password
+<img src="./screenshots/webauthn-1password.png" width="500" alt="1Password">
+
+### YubiKey
+<img src="./screenshots/webauthn-yubikey5.png" width="500" alt="YubiKey">
 
 ## Resources
 
