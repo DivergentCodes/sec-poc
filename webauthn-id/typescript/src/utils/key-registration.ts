@@ -19,34 +19,35 @@ import { lookupRecognizedAAGUID } from './aaguid-lists';
  * @returns The registration options
  */
 export async function keyRegistrationRequest(
-  rpName: string,
-  rpID: string,
-  user: UserModel
+  user: UserModel,
+  opts: {
+    rpID: string;
+    rpName: string;
+    userVerification: UserVerificationRequirement;
+    residentKey: ResidentKeyRequirement;
+    attestation: AttestationConveyancePreference;
+  }
 ) {
   // TODO: fine-tune residentKey, userVerification, authenticatorAttachment
+  console.log(`Attestation type: ${opts.attestation}`);
   const genOptions: GenerateRegistrationOptionsOpts = {
-    rpName,
-    rpID,
+    rpName: opts.rpName,
+    rpID: opts.rpID,
     userID: Buffer.from(user.id),
     userName: user.name,
     challenge: Buffer.from(crypto.randomBytes(32)),
-    attestationType: 'direct',
+    attestationType: opts.attestation,
     authenticatorSelection: {
       //authenticatorAttachment: 'cross-platform',
-      requireResidentKey: false,
-      residentKey: 'preferred',
-      userVerification: 'preferred',
+      userVerification: opts.userVerification,
+      requireResidentKey: opts.residentKey === 'required',
+      residentKey: opts.residentKey,
     }
   }
   const options = await generateRegistrationOptions(genOptions);
 
-  console.log('Registration options generated:', {
-    rpName,
-    rpID,
-    userId: user.id,
-    userName: user.name,
-    challengeLength: options.challenge.length,
-  });
+  console.log('Registration options generated:');
+  console.dir(options, { depth: null });
 
   return options;
 }
@@ -79,6 +80,22 @@ export async function handleKeyRegistrationVerification(
     expectedChallenge: challenge,
     expectedOrigin: origin,
     expectedRPID: rpID,
+
+    // Optional configuration
+    requireUserVerification: false,        // Default: true
+    //supportedAlgorithmIDs: [-7, -257],    // Default: [-7, -257] (ES256, RS256)
+
+    // Optional verification of authenticator data
+    // requireBackupEligible: false,         // Default: false
+    // requireBackupStateTrue: false,        // Default: false
+    // requireBackupStateFalse: false,       // Default: false
+    // requireDiscoverableCredential: false, // Default: false
+
+    // Optional verification of attestation
+    //fidoAaguids: [],                       // Default: undefined
+    //mdsAuthenticators: [],                 // Default: undefined
+
+    // debug: false,                          // Default: false
   }
 
   // This is the verification provided by the simplewebauthn library.

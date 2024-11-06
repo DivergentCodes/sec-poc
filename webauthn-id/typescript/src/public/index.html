@@ -40,31 +40,241 @@
             font-weight: bold;
             color: #666;
         }
+        select {
+            padding: 6px;
+            margin-right: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        .metadata-item button {
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background-color: #f8f9fa;
+            cursor: pointer;
+        }
+
+        .metadata-item button:hover {
+            background-color: #e9ecef;
+        }
+
+        .intro-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 24px 32px;
+            margin: 24px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .intro-section p {
+            color: #2c3e50;
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin: 0 0 16px 0;
+        }
+
+        .intro-section ul {
+            color: #2c3e50;
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin: 0;
+            padding-left: 24px;
+        }
+
+        .intro-section li {
+            margin-bottom: 8px;
+        }
+
+        .intro-section li:last-child {
+            margin-bottom: 0;
+        }
+
+        .layout-container {
+            display: flex;
+            flex-wrap: wrap;
+        }
+
+        .left-column {
+            flex: 1;
+            padding-right: 20px;
+        }
+
+        .right-column {
+            flex: 1;
+        }
+
+        /* Layout styles */
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            margin: 0;
+            max-width: 100%;
+        }
+
+        .layout-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .left-column, .right-column {
+            width: 100%;
+        }
+
+        .action-buttons {
+            margin: 0 0 24px 0;
+        }
+
+        /* Responsive layout */
+        @media (min-width: 1024px) {
+            .layout-container {
+                flex-direction: row;
+                align-items: flex-start;
+            }
+
+            .left-column {
+                position: sticky;
+                top: 20px;
+                width: 400px;
+                flex-shrink: 0;
+            }
+
+            .right-column {
+                flex-grow: 1;
+                margin-left: 24px;
+            }
+        }
+
+        /* Adjust existing styles */
+        .credential {
+            max-width: 100%;
+        }
+
+        .metadata-item {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        @media (min-width: 768px) {
+            .metadata-item {
+                flex-direction: row;
+                align-items: center;
+            }
+        }
+
+        /* Make dropdowns more mobile-friendly */
+        select {
+            width: 100%;
+            max-width: 200px;
+            padding: 8px;
+        }
+
+        /* Make buttons more mobile-friendly */
+        button {
+            width: 100%;
+            margin: 8px 0;
+        }
+
+        @media (min-width: 768px) {
+            button {
+                width: auto;
+                margin: 5px;
+            }
+        }
+
+        /* Style for the checkmark/x container */
+        .status-icon {
+            display: inline-block;
+            width: 20px;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        /* Style for the label and content */
+        .metadata-content {
+            flex-grow: 1;
+            min-width: 0;
+        }
     </style>
 </head>
 <body>
     <h1>WebAuthn TypeScript Demo</h1>
-    <div class="metadata">
-        <div class="metadata-item">
-            <span class="detail-label">Environment:</span> <span id="environment"></span>
+
+    <div class="layout-container">
+        <div class="left-column">
+            <h2>About</h2>
+            <div class="intro-section">
+                <p>This demo showcases WebAuthn authenticator metadata and verification capabilities.</p>
+                <p>It demonstrates how to:</p>
+                <ul>
+                    <li>Identify authenticators by examining their AAGUID identifiers</li>
+                    <li>Verify authenticator legitimacy by examining their certificates and consulting 3rd parties</li>
+                    <li>Show the relative strength of different authenticators</li>
+                </ul>
+            </div>
+
+            <h2>Service Configuration</h2>
+            <div class="metadata">
+                <div class="metadata-item">
+                    <span class="detail-label">Environment:</span> <span id="environment"></span>
+                </div>
+                <div class="metadata-item">
+                    <span class="detail-label">RP Name:</span> <span id="rpName"></span>
+                </div>
+                <div class="metadata-item">
+                    <span class="detail-label">RP ID:</span> <span id="rpID"></span>
+                </div>
+                <div class="metadata-item">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span class="detail-label" style="min-width: 215px;">User Verification Enforcement:</span>
+                        <select id="userVerification">
+                            <option value="required">Required</option>
+                            <option value="preferred">Preferred</option>
+                            <option value="discouraged">Discouraged</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="metadata-item">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span class="detail-label" style="min-width: 215px;">Resident Key Requirement:</span>
+                        <select id="residentKey">
+                            <option value="required">Required</option>
+                            <option value="preferred">Preferred</option>
+                            <option value="discouraged">Discouraged</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="metadata-item">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span class="detail-label" style="min-width: 215px;">Attestation Preference:</span>
+                        <select id="attestation">
+                            <option value="none">None</option>
+                            <option value="indirect">Indirect</option>
+                            <option value="direct">Direct</option>
+                            <option value="enterprise">Enterprise</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="status"></div>
         </div>
-        <div class="metadata-item">
-            <span class="detail-label">RP Name:</span> <span id="rpName"></span>
-        </div>
-        <div class="metadata-item">
-            <span class="detail-label">RP ID:</span> <span id="rpID"></span>
+
+        <div class="right-column">
+            <h2>Registered Authenticators</h2>
+            <div class="action-buttons">
+                <button onclick="registerCredential()">Register New Authenticator</button>
+                <button onclick="authenticate()">Authenticate</button>
+            </div>
+            <div id="credentials"></div>
         </div>
     </div>
-
-    <div>
-        <button onclick="registerCredential()">Register New Authenticator</button>
-        <button onclick="authenticate()">Authenticate</button>
-    </div>
-
-    <div id="status"></div>
-
-    <h2>Registered Authenticators</h2>
-    <div id="credentials"></div>
 
     <script type="module">
         import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser/dist/bundle/index.js';
@@ -76,6 +286,16 @@
             document.getElementById('environment').textContent = config.environment;
             document.getElementById('rpName').textContent = config.rpName;
             document.getElementById('rpID').textContent = config.rpID;
+
+            if (config.userVerification) {
+                document.getElementById('userVerification').value = config.userVerification;
+            }
+            if (config.residentKey) {
+                document.getElementById('residentKey').value = config.residentKey;
+            }
+            if (config.attestation) {
+                document.getElementById('attestation').value = config.attestation;
+            }
         }
         fetchConfig();
 
@@ -101,7 +321,10 @@
 
         window.registerCredential = async () => {
             try {
-                const optionsResponse = await fetch('/register');
+                const userVerification = document.getElementById('userVerification').value;
+                const residentKey = document.getElementById('residentKey').value;
+                const attestation = document.getElementById('attestation').value;
+                const optionsResponse = await fetch(`/register?userVerification=${userVerification}&residentKey=${residentKey}&attestation=${attestation}`);
                 const optionsJSON = await optionsResponse.json();
 
                 console.log('Registration options from the server:');
@@ -137,7 +360,9 @@
 
         window.authenticate = async () => {
             try {
-                const optionsResponse = await fetch('/authenticate');
+                const userVerification = document.getElementById('userVerification').value;
+                const residentKey = document.getElementById('residentKey').value;
+                const optionsResponse = await fetch(`/authenticate?userVerification=${userVerification}&residentKey=${residentKey}`);
                 const optionsJSON = await optionsResponse.json();
 
                 console.log('Authentication options from the server:');
@@ -202,11 +427,8 @@
             <h4>Authenticator Identification</h4>
             <div style="display: flex; justify-content: flex-start; align-items: flex-start;">
                 <div>
-                    <div class="metadata-item"><span class="detail-label">Name:</span> ${cred.recognizedAAGUID?.name}</div>
                     <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
-                    <div class="metadata-item">
-                        <span class="detail-label">Attestation Type:</span> ${cred.attestationType || 'none'}
-                    </div>
+                    <div class="metadata-item"><span class="detail-label">Name:</span> ${cred.recognizedAAGUID?.name || 'Unspecified'}</div>
                 </div>
                 ${cred.recognizedAAGUID?.icon_light? `
                 <div class="metadata-item" style="margin-left: 16px; flex-shrink: 0;">
@@ -215,42 +437,54 @@
                 ` : ''}
             </div>
 
-            <h4>Authenticator Attestation Capabilities</h4>
+            <h4> Authenticator Attestation </h4>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.recognizedAAGUID ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.recognizedAAGUID ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.recognizedAAGUID ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">AAGUID in Unofficial Lists</span>
+                <span class="metadata-content">
+                    <span class="detail-label">AAGUID in Unofficial Lists</span>
+                </span>
             </div>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.fidoMdsAAGUID ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.fidoMdsAAGUID ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.fidoMdsAAGUID ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">AAGUID in FIDO MDS</span>
+                <span class="metadata-content">
+                    <span class="detail-label">AAGUID in FIDO MDS</span>
+                </span>
             </div>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.certPresent ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.certPresent ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.certPresent ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">Certificate Present</span>
+                <span class="metadata-content">
+                    <span class="detail-label">Certificate Present</span>
+                </span>
             </div>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.certValid ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.certValid ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.certValid ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">Certificate Valid</span>
+                <span class="metadata-content">
+                    <span class="detail-label">Certificate Valid</span>
+                </span>
             </div>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.certChainValid ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.certChainValid ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.certChainValid ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">Certificate Chain Valid</span>
+                <span class="metadata-content">
+                    <span class="detail-label">Certificate Chain Valid</span>
+                </span>
             </div>
             <div class="metadata-item">
-                <span style="color: ${cred.authenticatorChecks.fidoRootCertValid ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
+                <span class="status-icon" style="color: ${cred.authenticatorChecks.fidoRootCertValid ? '#22c55e' : '#ef4444'};">
                     ${cred.authenticatorChecks.fidoRootCertValid ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">FIDO Root Certificate Valid</span>
+                <span class="metadata-content">
+                    <span class="detail-label">FIDO Root Certificate Valid</span>
+                </span>
             </div>
             ${cred.certChainValidation?.error ? `
                 <div class="metadata-item" style="margin-top: 10px;">
@@ -312,6 +546,27 @@
                 throw error;
             }
         }
+
+        // Add this with your other functions in the script section
+        window.updateUserVerification = async () => {
+            try {
+                const select = document.getElementById('userVerification');
+                const value = select.value;
+
+                const response = await fetch(`/config/userVerification?value=${value}`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showStatus('User verification setting updated successfully');
+                } else {
+                    throw new Error(result.message || 'Update failed');
+                }
+            } catch (error) {
+                showStatus(`Failed to update user verification: ${error.message}`, true);
+            }
+        };
     </script>
 </body>
 </html>

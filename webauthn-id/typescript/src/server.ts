@@ -1,11 +1,6 @@
 import express from 'express';
 import session from 'express-session';
 import path from 'path';
-import {
-  verifyRegistrationResponse,
-  verifyAuthenticationResponse,
-  VerifyAuthenticationResponseOpts,
-} from '@simplewebauthn/server';
 import { parseFidoMetadataJWT } from './utils/fido-mds';
 import { AuthenticatorModel, theUser, UserModel } from './types/models';
 import { handleKeyRegistrationVerification, keyRegistrationRequest } from './utils/key-registration';
@@ -23,6 +18,9 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const RP_ID = process.env.RP_ID || 'localhost';
 const RP_NAME = process.env.RP_NAME || 'WebAuthn TypeScript Demo Default';
 const ORIGIN = process.env.ORIGIN || `http://${RP_ID}:${PORT}`;
+const DEFAULT_USER_VERIFICATION = process.env.WEBAUTHN_USER_VERIFICATION || 'preferred';
+const DEFAULT_RESIDENT_KEY = process.env.WEBAUTHN_RESIDENT_KEY || 'preferred';
+const DEFAULT_ATTESTATION = process.env.WEBAUTHN_ATTESTATION || 'direct';
 
 // In-memory storage - replace with database in production
 const authenticators: Map<string, AuthenticatorModel> = new Map();
@@ -69,7 +67,18 @@ app.get('/register', async (req, res) => {
   console.log('Starting registration process...');
   console.log(`Generating registration options for user: ${theUser.name}`);
 
-  const options = await keyRegistrationRequest(RP_NAME, RP_ID, theUser);
+  const userVerification = req.query.userVerification as UserVerificationRequirement || DEFAULT_USER_VERIFICATION;
+  const residentKey = req.query.residentKey as ResidentKeyRequirement || DEFAULT_RESIDENT_KEY;
+  const attestation = req.query.attestation as AttestationConveyancePreference || DEFAULT_ATTESTATION;
+
+  const regOptions = {
+    rpID: RP_ID,
+    rpName: RP_NAME,
+    userVerification,
+    residentKey,
+    attestation,
+  };
+  const options = await keyRegistrationRequest(theUser, regOptions);
   req.session.challenge = options.challenge;
 
   // Force session save and wait for it
@@ -214,6 +223,9 @@ app.get('/config', (req, res) => {
         rpID: RP_ID,
         rpName: RP_NAME,
         origin: ORIGIN,
+        userVerification: DEFAULT_USER_VERIFICATION,
+        residentKey: DEFAULT_RESIDENT_KEY,
+        attestation: DEFAULT_ATTESTATION,
     });
 });
 

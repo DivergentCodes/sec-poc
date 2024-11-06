@@ -28,6 +28,9 @@ and certificate information.
 ### YubiKey
 <img src="./screenshots/webauthn-yubikey5.png" width="500" alt="YubiKey">
 
+### YubiKey Without Attestation
+<img src="./screenshots/webauthn-yubikey5-no-attest.png" width="500" alt="YubiKey">
+
 ## Resources
 
 - [FIDO Metadata Service](https://fidoalliance.org/metadata/)
