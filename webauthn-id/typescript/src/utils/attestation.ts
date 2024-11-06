@@ -2,6 +2,7 @@ import { X509Certificate } from 'crypto';
 import { AttestationStruct, YUBIKEY_AAGUIDS } from '../types/attestation';
 import base64url from 'base64url';
 import cbor from 'cbor';
+import { lookupRecognizedAAGUID } from './aaguid-lists';
 
 export interface AttestationStatement {
   alg: number;
@@ -21,7 +22,8 @@ export function decodeAttestationObject(attestationObject: string): AttestationS
  * @returns True if the AAGUID is recognized, false otherwise
  */
 export function isRecognizedAAGUID(aaguid: string): boolean {
-  return aaguid in YUBIKEY_AAGUIDS;
+  const result = lookupRecognizedAAGUID(aaguid);
+  return !!result;
 }
 
 /**

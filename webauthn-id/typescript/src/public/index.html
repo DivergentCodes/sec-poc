@@ -199,8 +199,17 @@
         <div class="metadata">
 
 
-            <h4>Static Metadata</h4>
+            <h4>Authenticator Identification</h4>
+            <div class="metadata-item"><span class="detail-label">Name:</span> ${cred.recognizedAAGUID?.name}</div>
+            ${cred.recognizedAAGUID?.icon_light? `
+            <div class="metadata-item">
+                <img src="${cred.recognizedAAGUID.icon_light}" alt="Authenticator Icon" style="max-width: 64px; margin-top: 5px;">
+            </div>
+            ` : ''}
             <div class="metadata-item"><span class="detail-label">AAGUID:</span> ${cred.aaguid}</div>
+            <div class="metadata-item">
+                <span class="detail-label">Attestation Type:</span> ${cred.attestationType || 'none'}
+            </div>
 
 
             <h4>Dynamic Metadata</h4>
@@ -209,23 +218,12 @@
             <div class="metadata-item"><span class="detail-label">Sign Count:</span> ${cred.counter}</div>
 
 
-            <h4>Attestation Details</h4>
-            ${cred.fidoMetadata?.metadataStatement?.icon ? `
-            <div class="metadata-item">
-                <img src="${cred.fidoMetadata.metadataStatement.icon}" alt="Authenticator Icon" style="max-width: 64px; margin-top: 5px;">
-            </div>
-            ` : ''}
-            <div class="metadata-item">
-                <span class="detail-label">Type:</span> ${cred.attestationType || 'none'}
-            </div>
-
-
             <h4>Authenticator Checks</h4>
             <div class="metadata-item">
                 <span style="color: ${cred.authenticatorChecks.recognizedAAGUID ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">
                     ${cred.authenticatorChecks.recognizedAAGUID ? '✔' : '✘'}
                 </span>
-                <span class="detail-label">AAGUID Recognized</span>
+                <span class="detail-label">AAGUID in Unofficial Lists</span>
             </div>
             <div class="metadata-item">
                 <span style="color: ${cred.authenticatorChecks.fidoMdsAAGUID ? '#22c55e' : '#ef4444'}; display: inline-block; width: 20px; font-size: 18px;">

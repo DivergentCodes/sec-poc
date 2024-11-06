@@ -6,6 +6,7 @@ import { getFidoMetadataEntryByAAGUID } from './fido-mds';
 import crypto from 'crypto';
 import { AuthenticatorChecks } from '../types/authenticator';
 import { CertificateChainValidationResult, validateAuthenticatorCertificate, validateCertificateChain, validateFIDOCertificateChain } from './certificate-validation';
+import { lookupRecognizedAAGUID } from './aaguid-lists';
 
 /**
  * Generate registration options for the browser to pass to a supported authenticator.
@@ -99,7 +100,9 @@ export async function handleKeyRegistrationVerification(
     fidoRootCertValid: false,
   };
 
-  authenticatorChecks.recognizedAAGUID = isRecognizedAAGUID(aaguid);
+  const recognizedAAGUID = lookupRecognizedAAGUID(aaguid);
+  authenticatorChecks.recognizedAAGUID = !!recognizedAAGUID;
+
   if (authenticatorChecks.recognizedAAGUID) {
     console.log('✅ AAGUID is recognized:', aaguid);
   } else {
@@ -178,6 +181,7 @@ export async function handleKeyRegistrationVerification(
     deviceType: credentialDeviceType,
     backedUp: credentialBackedUp,
 
+    recognizedAAGUID,
     fidoMetadata,
     certChainValidation,
     fidoRootCertValidation,

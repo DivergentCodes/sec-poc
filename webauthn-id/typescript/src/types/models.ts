@@ -1,7 +1,9 @@
 import { CredentialDeviceType, AuthenticatorTransportFuture } from '@simplewebauthn/types';
-import { FidoMetadataEntry } from '../utils/fido-mds';
+
 import { AuthenticatorChecks } from './authenticator';
 import { CertificateChainValidationResult } from '../utils/certificate-validation';
+import { FidoMetadataEntry } from '../utils/fido-mds';
+import { RecognizedAAGUID } from './types';
 
 export type UserModel = {
   id: any;
@@ -57,7 +59,7 @@ export type AuthenticatorModel = {
   attestationTrustPath?: string[];
   verificationMethod?: string;
 
-  // FIDO Metadata Service
+  recognizedAAGUID?: RecognizedAAGUID;
   fidoMetadata?: FidoMetadataEntry;
   certChainValidation?: CertificateChainValidationResult;
   fidoRootCertValidation?: CertificateChainValidationResult;

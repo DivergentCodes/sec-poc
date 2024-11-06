@@ -26,3 +26,12 @@ export interface AuthenticationDetails {
     userPresent?: boolean;
     authenticationTime: string;
 }
+
+export interface RecognizedAAGUID {
+  aaguid: string;
+  name: string;
+  icon?: string;
+  authenticatorVersion?: number;
+  description?: string;
+  website?: string;
+}
