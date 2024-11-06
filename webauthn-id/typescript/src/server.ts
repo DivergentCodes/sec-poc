@@ -55,7 +55,11 @@ app.use((req, res, next) => {
 
 // Routes
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.status(404).send('Not Found');
+});
+
+app.get('/webauthn', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'webauthn.html'));
 });
 
 /**
