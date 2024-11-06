@@ -13,6 +13,14 @@ export interface Authenticator {
     isVerifiedYubikey?: boolean;
     isCryptographicallyVerified?: boolean;
     yubikeyModel?: string;
-    attestationType?: string;
-    attestationTrustPath?: string[];
+}
+
+export interface AuthenticatorChecks {
+    recognizedAAGUID: boolean;
+    fidoMdsAAGUID: boolean;
+    certPresent: boolean;
+    certHasAAGUID: boolean;
+    certValid: boolean;
+    certChainValid: boolean;
+    fidoRootCertValid: boolean;
 }
