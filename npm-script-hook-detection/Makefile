@@ -6,11 +6,11 @@ GO=go
 all: build
 
 build:
-	$(GO) build -o $(BINARY_NAME) main.go
+	$(GO) build -o dist/$(BINARY_NAME) main.go
 
 clean:
 	$(GO) clean
-	rm -f $(BINARY_NAME)
+	rm -f dist/$(BINARY_NAME)
 
 test:
 	$(GO) test ./...
