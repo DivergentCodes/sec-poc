@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -30,7 +32,7 @@ type PackageInfo struct {
 	Scripts map[string]string `json:"scripts"`
 }
 
-// Fetches package metadata from the NPM registry
+// Fetch package metadata from the NPM registry
 func getPackageMetadata(pkg string) (string, error) {
 	url := fmt.Sprintf("https://registry.npmjs.org/%s", pkg)
 	resp, err := http.Get(url)
@@ -50,6 +52,23 @@ func getPackageMetadata(pkg string) (string, error) {
 	}
 
 	return metadata.DistTags.Latest, nil
+}
+
+// Fetch package.json from an NPM package
+func fetchPackageJSON(pkg, version string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("https://registry.npmjs.org/%s/%s", pkg, version)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var packageData map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&packageData); err != nil {
+		return nil, err
+	}
+
+	return packageData, nil
 }
 
 // Reads package.json inside a .tgz file without extracting
@@ -102,6 +121,46 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 	return nil, nil // No lifecycle scripts found
 }
 
+// Parse dependencies from a package.json map
+func parseDependencies(pkgData map[string]interface{}) []string {
+	uniquePackages := make(map[string]bool)
+
+	if dependencies, ok := pkgData["dependencies"].(map[string]interface{}); ok {
+		for dep := range dependencies {
+			uniquePackages[dep] = true
+		}
+	}
+	if devDependencies, ok := pkgData["devDependencies"].(map[string]interface{}); ok {
+		for dep := range devDependencies {
+			uniquePackages[dep] = true
+		}
+	}
+
+	var packages []string
+	for pkg := range uniquePackages {
+		packages = append(packages, pkg)
+	}
+
+	return packages
+}
+
+// Parse dependencies from a local package.json file
+func getDependenciesFromFile(packageJSONPath string) ([]string, error) {
+	file, err := os.Open(packageJSONPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var pkg map[string]interface{}
+	if err := json.NewDecoder(file).Decode(&pkg); err != nil {
+		return nil, err
+	}
+
+	return parseDependencies(pkg), nil
+}
+
+// Process an individual package
 func processPackage(pkg string, wg *sync.WaitGroup, results chan<- PackageInfo) {
 	defer wg.Done()
 
@@ -123,7 +182,38 @@ func processPackage(pkg string, wg *sync.WaitGroup, results chan<- PackageInfo) 
 }
 
 func main() {
-	packages := []string{"express", "lodash", "react"} // Example package list
+	// Default to package.json in the current directory
+	defaultPath := filepath.Join(".", "package.json")
+	packageJSONPath := flag.String("package", defaultPath, "Path to package.json file")
+	npmPackage := flag.String("npm", "", "NPM package to use as the starting point")
+	flag.Parse()
+
+	var packages []string
+	var err error
+
+	if *npmPackage != "" {
+		// Fetch dependencies from the specified NPM package
+		version, err := getPackageMetadata(*npmPackage)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching metadata for %s: %v\n", *npmPackage, err)
+			os.Exit(1)
+		}
+
+		pkgData, err := fetchPackageJSON(*npmPackage, version)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching package.json for %s: %v\n", *npmPackage, err)
+			os.Exit(1)
+		}
+
+		packages = parseDependencies(pkgData)
+	} else {
+		// Read dependencies from a local package.json
+		packages, err = getDependenciesFromFile(*packageJSONPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading dependencies: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	var wg sync.WaitGroup
 	results := make(chan PackageInfo, len(packages))
