@@ -14,15 +14,41 @@ import (
 )
 
 // Lifecycle scripts to capture
+// https://docs.npmjs.com/cli/v11/using-npm/scripts
 var lifecycleScripts = map[string]bool{
-	"preinstall":    true,
-	"install":       true,
-	"postinstall":   true,
+	"preinstall":  true,
+	"install":     true,
+	"postinstall": true,
+
 	"preuninstall":  true,
 	"uninstall":     true,
 	"postuninstall": true,
-	"prepack":       true,
-	"postpack":      true,
+
+	"preprepare":  true,
+	"prepare":     true,
+	"postprepare": true,
+
+	"prepublish":  true,
+	"publish":     true,
+	"postpublish": true,
+
+	"prestart":  true,
+	"poststart": true,
+
+	"prerestart":  true,
+	"postrestart": true,
+
+	"prestop":  true,
+	"poststop": true,
+
+	"pretest":  true,
+	"posttest": true,
+
+	"prepack":  true,
+	"postpack": true,
+
+	"preversion":  true,
+	"postversion": true,
 }
 
 // PackageInfo holds metadata and script hooks
