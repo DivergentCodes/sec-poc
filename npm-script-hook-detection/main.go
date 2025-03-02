@@ -34,12 +34,39 @@ type PackageInfo struct {
 
 // PackageLock represents the structure of package-lock.json
 type PackageLock struct {
-	Dependencies map[string]PackageLockDep `json:"dependencies"`
-}
-
-type PackageLockDep struct {
+	Name         string                    `json:"name"`
 	Version      string                    `json:"version"`
 	Dependencies map[string]PackageLockDep `json:"dependencies,omitempty"`
+	Packages     map[string]PackageLockDep `json:"packages,omitempty"`
+}
+
+// Update PackageLockDep to handle string dependencies
+type PackageLockDep struct {
+	Version      string      `json:"version"`
+	Dependencies interface{} `json:"dependencies,omitempty"` // Can be map[string]PackageLockDep or string
+}
+
+// Add helper function to convert interface{} dependencies to map
+func convertDependencies(deps interface{}) map[string]PackageLockDep {
+	if deps == nil {
+		return nil
+	}
+
+	switch d := deps.(type) {
+	case map[string]interface{}:
+		result := make(map[string]PackageLockDep)
+		for name, dep := range d {
+			if depMap, ok := dep.(map[string]interface{}); ok {
+				result[name] = PackageLockDep{
+					Version:      depMap["version"].(string),
+					Dependencies: depMap["dependencies"],
+				}
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 // Lifecycle scripts to capture
@@ -307,8 +334,9 @@ func processLockDependencies(deps map[string]PackageLockDep, chain []string, dep
 				}
 			}
 
-			if len(dep.Dependencies) > 0 {
-				processLockDependencies(dep.Dependencies, fullChain, depth+1, wg, results)
+			// Convert and process nested dependencies
+			if nestedDeps := convertDependencies(dep.Dependencies); nestedDeps != nil {
+				processLockDependencies(nestedDeps, fullChain, depth+1, wg, results)
 			}
 
 			if !silent {
@@ -394,7 +422,7 @@ func processNpmPackage(pkg string, versionConstraint string, chain []string, dep
 
 func main() {
 	defaultPath := filepath.Join(".", "package-lock.json")
-	lockFilePath := flag.String("lock", defaultPath, "Path to package-lock.json file")
+	lockFilePath := flag.String("lockfile", defaultPath, "Path to package-lock.json file")
 	npmPackage := flag.String("npm", "", "NPM package to analyze (optional)")
 	npmVersion := flag.String("version", "", "NPM package version (optional, defaults to latest)")
 	silentFlag := flag.Bool("silent", false, "Enable silent output")
@@ -429,7 +457,8 @@ func main() {
 		wg.Add(1)
 		go processNpmPackage(*npmPackage, version, []string{}, 0, &wg, results)
 	} else {
-		// Process package-lock.json
+		fmt.Printf("🔍 Analyzing lockfile: %s\n", *lockFilePath)
+
 		file, err := os.Open(*lockFilePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Error opening package-lock.json: %v\n", err)
@@ -443,13 +472,42 @@ func main() {
 			os.Exit(1)
 		}
 
-		processLockDependencies(lockFile.Dependencies, []string{}, 1, &wg, results)
+		// Handle both old and new package-lock.json formats
+		if len(lockFile.Dependencies) > 0 {
+			processLockDependencies(lockFile.Dependencies, []string{}, 1, &wg, results)
+		} else if len(lockFile.Packages) > 0 {
+			// Convert packages to the same format as dependencies
+			deps := make(map[string]PackageLockDep)
+			for path, pkg := range lockFile.Packages {
+				if path == "" || path == "node_modules" {
+					continue // Skip root package and node_modules directory
+				}
+
+				// Clean up the package name by removing node_modules/ prefix and any nested node_modules
+				name := path
+				if strings.HasPrefix(name, "node_modules/") {
+					name = strings.TrimPrefix(name, "node_modules/")
+				}
+				// Handle nested node_modules paths
+				parts := strings.Split(name, "node_modules/")
+				name = parts[len(parts)-1]
+
+				deps[name] = pkg
+			}
+			processLockDependencies(deps, []string{}, 1, &wg, results)
+		}
 	}
 
-	wg.Wait()
-	close(results)
+	// Create a goroutine to close results after all work is done
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
-	var packageInfos []PackageInfo
+	// Initialize empty slice to ensure we don't output null
+	packageInfos := []PackageInfo{}
+
+	// Collect results
 	for pkgInfo := range results {
 		packageInfos = append(packageInfos, pkgInfo)
 	}
