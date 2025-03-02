@@ -47,6 +47,12 @@ var lifecycleScripts = map[string]bool{
 	"postversion": true,
 }
 
+var (
+	verbose = false
+
+	processedPackages sync.Map
+)
+
 // PackageInfo holds metadata, script hooks, depth, and dependency chain
 type PackageInfo struct {
 	Name    string            `json:"name"`
@@ -114,7 +120,9 @@ func makeNpmTarballURL(pkg, version string) string {
 // Fetch package.json from an NPM package tarball, handling scoped packages correctly
 func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 	url := makeNpmTarballURL(pkg, version)
-	fmt.Printf("⬇️ Fetching tarball for %s @ %s from: %s\n", pkg, version, url)
+	if verbose {
+		fmt.Printf("⬇️ Fetching tarball for %s @ %s from: %s\n", pkg, version, url)
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -179,8 +187,8 @@ func parseDependencies(pkgData map[string]interface{}) []string {
 			uniquePackages[dep] = true
 		}
 	}
-	if devDependencies, ok := pkgData["devDependencies"].(map[string]interface{}); ok {
-		for dep := range devDependencies {
+	if optionalDependencies, ok := pkgData["optionalDependencies"].(map[string]interface{}); ok {
+		for dep := range optionalDependencies {
 			uniquePackages[dep] = true
 		}
 	}
@@ -202,6 +210,19 @@ func processPackage(pkg string, chain []string, depth int, wg *sync.WaitGroup, r
 		fmt.Fprintf(os.Stderr, "❌ Error fetching metadata for %s @ %s: %v\n", pkg, version, err)
 		return
 	}
+
+	// Create a unique package identifier that includes the version
+	pkgIdentifier := fmt.Sprintf("%s@%s", pkg, version)
+	// Check if we've already processed this specific version
+	if _, exists := processedPackages.Load(pkgIdentifier); exists {
+		if verbose {
+			fmt.Printf("📦 Skipping already processed package: %s\n", pkgIdentifier)
+		}
+		return
+	}
+
+	// Mark this specific version as processed
+	processedPackages.Store(pkgIdentifier, true)
 
 	scripts, err := getLifecycleScripts(pkg, version)
 	if err != nil {
@@ -246,11 +267,21 @@ func getDependenciesFromFile(filePath string) ([]string, error) {
 }
 
 func main() {
+	fmt.Println("🔍 NPM Script Hook Detection Tool")
+	fmt.Println("Analyzing dependencies for potentially malicious lifecycle scripts...")
+	fmt.Println()
+
 	// Default to package.json in the current directory
 	defaultPath := filepath.Join(".", "package.json")
 	packageJSONPath := flag.String("package", defaultPath, "Path to package.json file")
 	npmPackage := flag.String("npm", "", "NPM package to use as the starting point")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
+
+	verbose = *verboseFlag
+	if verbose {
+		fmt.Println("Verbose output enabled")
+	}
 
 	var packages []string
 	var err error
@@ -260,13 +291,13 @@ func main() {
 		// Fetch dependencies from the specified NPM package
 		version, err := getPackageMetadata(*npmPackage)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fetching metadata for %s: %v\n", *npmPackage, err)
+			fmt.Fprintf(os.Stderr, "❌ Error fetching metadata for %s: %v\n", *npmPackage, err)
 			os.Exit(1)
 		}
 
 		pkgData, err := fetchPackageJSON(*npmPackage, version)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fetching package.json for %s: %v\n", *npmPackage, err)
+			fmt.Fprintf(os.Stderr, "❌ Error fetching package.json for %s: %v\n", *npmPackage, err)
 			os.Exit(1)
 		}
 
@@ -276,7 +307,7 @@ func main() {
 		// Read dependencies from a local package.json
 		packages, err = getDependenciesFromFile(*packageJSONPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading dependencies: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ Error reading dependencies: %v\n", err)
 			os.Exit(1)
 		}
 
