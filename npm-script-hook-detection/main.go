@@ -18,6 +18,7 @@ import (
 )
 
 var (
+	silent            = false
 	verbose           = false
 	processedPackages sync.Map
 )
@@ -310,7 +311,9 @@ func processLockDependencies(deps map[string]PackageLockDep, chain []string, dep
 				processLockDependencies(dep.Dependencies, fullChain, depth+1, wg, results)
 			}
 
-			fmt.Printf("✅ Processed %s @ %s\n", pkg, dep.Version)
+			if !silent {
+				fmt.Printf("✅ Processed %s @ %s\n", pkg, dep.Version)
+			}
 		}(pkg, dep)
 	}
 }
@@ -390,20 +393,28 @@ func processNpmPackage(pkg string, versionConstraint string, chain []string, dep
 }
 
 func main() {
-	fmt.Println("🔍 NPM Script Hook Detection Tool")
-	fmt.Println("Analyzing dependencies for potentially malicious lifecycle scripts...")
-	fmt.Println()
-
 	defaultPath := filepath.Join(".", "package-lock.json")
 	lockFilePath := flag.String("lock", defaultPath, "Path to package-lock.json file")
 	npmPackage := flag.String("npm", "", "NPM package to analyze (optional)")
 	npmVersion := flag.String("version", "", "NPM package version (optional, defaults to latest)")
+	silentFlag := flag.Bool("silent", false, "Enable silent output")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
 
+	silent = *silentFlag
 	verbose = *verboseFlag
+	if verbose && silent {
+		fmt.Println("Silent and verbose flags cannot be used together")
+		os.Exit(1)
+	}
 	if verbose {
 		fmt.Println("Verbose output enabled")
+	}
+
+	if !silent {
+		fmt.Println("🔍 NPM Script Hook Detection Tool")
+		fmt.Println("Analyzing dependencies for potentially malicious lifecycle scripts...")
+		fmt.Println()
 	}
 
 	var results = make(chan PackageInfo, 100)
