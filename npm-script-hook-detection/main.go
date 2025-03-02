@@ -10,46 +10,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+
+	"github.com/Masterminds/semver/v3"
 )
 
-// Lifecycle scripts to capture
-var lifecycleScripts = map[string]bool{
-	"preinstall":  true,
-	"postinstall": true,
-
-	"preuninstall":  true,
-	"postuninstall": true,
-
-	"preprepare":  true,
-	"postprepare": true,
-
-	"prepublish":  true,
-	"postpublish": true,
-
-	"prestart":  true,
-	"poststart": true,
-
-	"prerestart":  true,
-	"postrestart": true,
-
-	"prestop":  true,
-	"poststop": true,
-
-	"pretest":  true,
-	"posttest": true,
-
-	"prepack":  true,
-	"postpack": true,
-
-	"preversion":  true,
-	"postversion": true,
-}
-
 var (
-	verbose = false
-
+	verbose           = false
 	processedPackages sync.Map
 )
 
@@ -60,6 +29,115 @@ type PackageInfo struct {
 	Scripts map[string]string `json:"scripts"`
 	Depth   int               `json:"depth"`
 	Chain   []string          `json:"chain"`
+}
+
+// PackageLock represents the structure of package-lock.json
+type PackageLock struct {
+	Dependencies map[string]PackageLockDep `json:"dependencies"`
+}
+
+type PackageLockDep struct {
+	Version      string                    `json:"version"`
+	Dependencies map[string]PackageLockDep `json:"dependencies,omitempty"`
+}
+
+// Lifecycle scripts to capture
+var lifecycleScripts = map[string]bool{
+	"preinstall":    true,
+	"postinstall":   true,
+	"preuninstall":  true,
+	"postuninstall": true,
+	"preprepare":    true,
+	"postprepare":   true,
+	"prepublish":    true,
+	"postpublish":   true,
+	"prestart":      true,
+	"poststart":     true,
+	"prerestart":    true,
+	"postrestart":   true,
+	"prestop":       true,
+	"poststop":      true,
+	"pretest":       true,
+	"posttest":      true,
+	"prepack":       true,
+	"postpack":      true,
+	"preversion":    true,
+	"postversion":   true,
+}
+
+// Add new type for NPM registry response
+type NpmRegistryResponse struct {
+	Versions map[string]struct {
+		Dependencies map[string]string `json:"dependencies"`
+	} `json:"versions"`
+}
+
+// Update getPackageMetadata to return all versions
+func getPackageVersions(pkg string) (map[string]map[string]string, error) {
+	url := fmt.Sprintf("https://registry.npmjs.org/%s", pkg)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch package metadata: %s", resp.Status)
+	}
+
+	var npmResp NpmRegistryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&npmResp); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]map[string]string)
+	for version, data := range npmResp.Versions {
+		result[version] = data.Dependencies
+	}
+	return result, nil
+}
+
+// Add function to resolve version constraint
+func resolveVersion(pkg, constraint string, versions map[string]map[string]string) (string, map[string]string, error) {
+	// Handle exact versions (those starting with = or not having any constraint)
+	if strings.HasPrefix(constraint, "=") || !strings.ContainsAny(constraint, "^~><= ") {
+		cleanVersion := strings.TrimPrefix(constraint, "=")
+		if deps, ok := versions[cleanVersion]; ok {
+			return cleanVersion, deps, nil
+		}
+		return "", nil, fmt.Errorf("exact version %s not found", cleanVersion)
+	}
+
+	// Parse constraint
+	c, err := semver.NewConstraint(constraint)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid version constraint %s: %v", constraint, err)
+	}
+
+	// Convert versions to semver.Version objects
+	var validVersions []*semver.Version
+	for v := range versions {
+		sv, err := semver.NewVersion(v)
+		if err != nil {
+			continue // Skip invalid versions
+		}
+		validVersions = append(validVersions, sv)
+	}
+
+	// Sort versions in descending order
+	sort.Slice(validVersions, func(i, j int) bool {
+		return validVersions[i].GreaterThan(validVersions[j])
+	})
+
+	// Find highest matching version
+	for _, v := range validVersions {
+		if c.Check(v) {
+			vStr := v.String()
+			return vStr, versions[vStr], nil
+		}
+	}
+
+	return "", nil, fmt.Errorf("no version matching constraint %s", constraint)
 }
 
 // Fetch package metadata from the NPM registry
@@ -84,52 +162,29 @@ func getPackageMetadata(pkg string) (string, error) {
 	return metadata.DistTags.Latest, nil
 }
 
-// Fetch package.json from an NPM package
-func fetchPackageJSON(pkg, version string) (map[string]interface{}, error) {
-	url := fmt.Sprintf("https://registry.npmjs.org/%s/%s", pkg, version)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var packageData map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&packageData); err != nil {
-		return nil, err
-	}
-
-	return packageData, nil
-}
-
 // Generate the correct tarball URL for both namespaced and non-namespaced packages
 func makeNpmTarballURL(pkg, version string) string {
-	// If the package is namespaced (starts with "@"), we need to separate the namespace
 	if strings.HasPrefix(pkg, "@") {
-		// Extract the namespace and package name
 		namespace := pkg[:strings.Index(pkg, "/")]
 		packageName := pkg[strings.Index(pkg, "/")+1:]
-
-		// Construct the URL for namespaced packages
 		return fmt.Sprintf("https://registry.npmjs.org/%s/%s/-/%s-%s.tgz", namespace, packageName, packageName, version)
-	} else {
-		// For non-namespaced packages, the full name is used in both the path and tarball segment
-		return fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", pkg, pkg, version)
 	}
+	return fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", pkg, pkg, version)
 }
 
-// Fetch package.json from an NPM package tarball, handling scoped packages correctly
+// Fetch package.json from an NPM package tarball
 func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 	url := makeNpmTarballURL(pkg, version)
 	if verbose {
 		fmt.Printf("⬇️ Fetching tarball for %s @ %s from: %s\n", pkg, version, url)
 	}
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// Check for HTTP errors
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch package tarball: %s", resp.Status)
 	}
@@ -140,7 +195,6 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 	}
 	tarReader := tar.NewReader(gzipReader)
 
-	// Loop through files in the tarball to find the package.json
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -150,7 +204,6 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 			return nil, err
 		}
 
-		// Look for the package.json file inside the tarball
 		if header.Name == "package/package.json" {
 			var pkgJSON struct {
 				Scripts map[string]string `json:"scripts"`
@@ -159,7 +212,6 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 				return nil, err
 			}
 
-			// Filter only lifecycle scripts
 			lifecycleOnly := make(map[string]string)
 			for key, value := range pkgJSON.Scripts {
 				if lifecycleScripts[key] {
@@ -167,103 +219,174 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 				}
 			}
 
-			// Return lifecycle scripts if any are found
 			if len(lifecycleOnly) > 0 {
 				return lifecycleOnly, nil
 			}
 		}
 	}
 
-	// If no lifecycle scripts found
 	return nil, nil
 }
 
-// Parse dependencies from a package.json map
-func parseDependencies(pkgData map[string]interface{}) []string {
-	uniquePackages := make(map[string]bool)
+// Add new function to get package-lock.json from an NPM package tarball
+func getPackageLock(pkg, version string) (*PackageLock, error) {
+	url := makeNpmTarballURL(pkg, version)
+	if verbose {
+		fmt.Printf("⬇️ Fetching tarball for %s @ %s from: %s\n", pkg, version, url)
+	}
 
-	if dependencies, ok := pkgData["dependencies"].(map[string]interface{}); ok {
-		for dep := range dependencies {
-			uniquePackages[dep] = true
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch package tarball: %s", resp.Status)
+	}
+
+	gzipReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	tarReader := tar.NewReader(gzipReader)
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if header.Name == "package/package-lock.json" {
+			var lockFile PackageLock
+			if err := json.NewDecoder(tarReader).Decode(&lockFile); err != nil {
+				return nil, err
+			}
+			return &lockFile, nil
 		}
 	}
-	if optionalDependencies, ok := pkgData["optionalDependencies"].(map[string]interface{}); ok {
-		for dep := range optionalDependencies {
-			uniquePackages[dep] = true
-		}
-	}
 
-	var packages []string
-	for pkg := range uniquePackages {
-		packages = append(packages, pkg)
-	}
-
-	return packages
+	return nil, fmt.Errorf("package-lock.json not found in package tarball")
 }
 
-// Recursively process dependencies
-func processPackage(pkg string, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
+// Process dependencies from package-lock.json
+func processLockDependencies(deps map[string]PackageLockDep, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
+	for pkg, dep := range deps {
+		wg.Add(1)
+		go func(pkg string, dep PackageLockDep) {
+			defer wg.Done()
+
+			pkgIdentifier := fmt.Sprintf("%s@%s", pkg, dep.Version)
+
+			if _, exists := processedPackages.Load(pkgIdentifier); exists {
+				if verbose {
+					fmt.Printf("📦 Skipping already processed package: %s\n", pkgIdentifier)
+				}
+				return
+			}
+			processedPackages.Store(pkgIdentifier, true)
+
+			scripts, err := getLifecycleScripts(pkg, dep.Version)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Error fetching scripts for %s @ %s: %v\n", pkg, dep.Version, err)
+				return
+			}
+
+			fullChain := append(chain, pkgIdentifier)
+			if scripts != nil {
+				results <- PackageInfo{
+					Name:    pkg,
+					Version: dep.Version,
+					Scripts: scripts,
+					Depth:   depth,
+					Chain:   fullChain,
+				}
+			}
+
+			if len(dep.Dependencies) > 0 {
+				processLockDependencies(dep.Dependencies, fullChain, depth+1, wg, results)
+			}
+
+			fmt.Printf("✅ Processed %s @ %s\n", pkg, dep.Version)
+		}(pkg, dep)
+	}
+}
+
+// Update processNpmPackage to handle "latest" version
+func processNpmPackage(pkg string, versionConstraint string, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
 	defer wg.Done()
 
-	version, err := getPackageMetadata(pkg)
+	// Get all versions and their dependencies
+	versions, err := getPackageVersions(pkg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error fetching metadata for %s @ %s: %v\n", pkg, version, err)
+		fmt.Fprintf(os.Stderr, "❌ Error fetching versions for %s: %v\n", pkg, err)
 		return
 	}
 
-	// Create a unique package identifier that includes the version
+	var version string
+	var deps map[string]string
+
+	// Handle "latest" version specially
+	if versionConstraint == "latest" {
+		latestVersion, err := getPackageMetadata(pkg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error fetching latest version for %s: %v\n", pkg, err)
+			return
+		}
+		version = latestVersion
+		deps = versions[latestVersion]
+	} else {
+		// Resolve other version constraints
+		resolvedVersion, resolvedDeps, err := resolveVersion(pkg, versionConstraint, versions)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error resolving version for %s @ %s: %v\n", pkg, versionConstraint, err)
+			return
+		}
+		version = resolvedVersion
+		deps = resolvedDeps
+	}
+
 	pkgIdentifier := fmt.Sprintf("%s@%s", pkg, version)
-	// Check if we've already processed this specific version
+
+	// Check if already processed
 	if _, exists := processedPackages.Load(pkgIdentifier); exists {
 		if verbose {
 			fmt.Printf("📦 Skipping already processed package: %s\n", pkgIdentifier)
 		}
 		return
 	}
-
-	// Mark this specific version as processed
 	processedPackages.Store(pkgIdentifier, true)
 
+	// Get lifecycle scripts
 	scripts, err := getLifecycleScripts(pkg, version)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error fetching scripts for %s @ %s: %v\n", pkg, version, err)
 		return
 	}
 
-	fullChain := append(chain, fmt.Sprintf("%s@%s", pkg, version))
+	fullChain := append(chain, pkgIdentifier)
 	if scripts != nil {
-		results <- PackageInfo{Name: pkg, Version: version, Scripts: scripts, Depth: depth, Chain: fullChain}
+		results <- PackageInfo{
+			Name:    pkg,
+			Version: version,
+			Scripts: scripts,
+			Depth:   depth,
+			Chain:   fullChain,
+		}
 	}
 
-	pkgData, err := fetchPackageJSON(pkg, version)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error fetching package.json for %s @ %s: %v\n", pkg, version, err)
-		return
-	}
-
-	dependencies := parseDependencies(pkgData)
-	fmt.Printf("✅ Processed %s @ %s\n", pkg, version)
-	for _, dep := range dependencies {
+	// Process dependencies recursively
+	for depName, depVersion := range deps {
 		wg.Add(1)
-		go processPackage(dep, fullChain, depth+1, wg, results)
-	}
-}
-
-// Reads and parses the package.json file to get dependencies
-func getDependenciesFromFile(filePath string) ([]string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var pkgData map[string]interface{}
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&pkgData); err != nil {
-		return nil, err
+		go processNpmPackage(depName, depVersion, fullChain, depth+1, wg, results)
 	}
 
-	return parseDependencies(pkgData), nil
+	if verbose {
+		fmt.Printf("✅ Processed %s @ %s\n", pkg, version)
+	}
 }
 
 func main() {
@@ -271,10 +394,10 @@ func main() {
 	fmt.Println("Analyzing dependencies for potentially malicious lifecycle scripts...")
 	fmt.Println()
 
-	// Default to package.json in the current directory
-	defaultPath := filepath.Join(".", "package.json")
-	packageJSONPath := flag.String("package", defaultPath, "Path to package.json file")
-	npmPackage := flag.String("npm", "", "NPM package to use as the starting point")
+	defaultPath := filepath.Join(".", "package-lock.json")
+	lockFilePath := flag.String("lock", defaultPath, "Path to package-lock.json file")
+	npmPackage := flag.String("npm", "", "NPM package to analyze (optional)")
+	npmVersion := flag.String("version", "", "NPM package version (optional, defaults to latest)")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
 
@@ -283,43 +406,33 @@ func main() {
 		fmt.Println("Verbose output enabled")
 	}
 
-	var packages []string
-	var err error
-	var rootChain []string
+	var results = make(chan PackageInfo, 100)
+	var wg sync.WaitGroup
 
 	if *npmPackage != "" {
-		// Fetch dependencies from the specified NPM package
-		version, err := getPackageMetadata(*npmPackage)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error fetching metadata for %s: %v\n", *npmPackage, err)
-			os.Exit(1)
+		version := *npmVersion
+		if version == "" {
+			version = "latest"
 		}
 
-		pkgData, err := fetchPackageJSON(*npmPackage, version)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error fetching package.json for %s: %v\n", *npmPackage, err)
-			os.Exit(1)
-		}
-
-		packages = parseDependencies(pkgData)
-		rootChain = []string{fmt.Sprintf("%s@%s", *npmPackage, version)}
-	} else {
-		// Read dependencies from a local package.json
-		packages, err = getDependenciesFromFile(*packageJSONPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error reading dependencies: %v\n", err)
-			os.Exit(1)
-		}
-
-		rootChain = []string{"local-package"}
-	}
-
-	var wg sync.WaitGroup
-	results := make(chan PackageInfo, len(packages))
-
-	for _, pkg := range packages {
 		wg.Add(1)
-		go processPackage(pkg, rootChain, 1, &wg, results)
+		go processNpmPackage(*npmPackage, version, []string{"root"}, 0, &wg, results)
+	} else {
+		// Process package-lock.json
+		file, err := os.Open(*lockFilePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error opening package-lock.json: %v\n", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		var lockFile PackageLock
+		if err := json.NewDecoder(file).Decode(&lockFile); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error parsing package-lock.json: %v\n", err)
+			os.Exit(1)
+		}
+
+		processLockDependencies(lockFile.Dependencies, []string{"root"}, 1, &wg, results)
 	}
 
 	wg.Wait()
@@ -330,7 +443,6 @@ func main() {
 		packageInfos = append(packageInfos, pkgInfo)
 	}
 
-	// Print JSON output
 	jsonOutput, _ := json.MarshalIndent(packageInfos, "", "  ")
 	fmt.Println(string(jsonOutput))
 }
