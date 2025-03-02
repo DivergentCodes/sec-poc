@@ -420,12 +420,142 @@ func processNpmPackage(pkg string, versionConstraint string, chain []string, dep
 	}
 }
 
+// Add function to read package.json from filesystem
+func readPackageJSON(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var pkgJSON struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &pkgJSON); err != nil {
+		return nil, err
+	}
+
+	lifecycleOnly := make(map[string]string)
+	for key, value := range pkgJSON.Scripts {
+		if lifecycleScripts[key] {
+			lifecycleOnly[key] = value
+		}
+	}
+
+	return lifecycleOnly, nil
+}
+
+// Add function to process node_modules directory
+func processNodeModules(path string, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error reading node_modules directory: %v\n", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Handle scoped packages (@org/pkg)
+		pkgPath := filepath.Join(path, entry.Name())
+		pkgName := entry.Name()
+
+		if strings.HasPrefix(pkgName, "@") {
+			// This is a scope directory, need to look one level deeper
+			scopedEntries, err := os.ReadDir(pkgPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Error reading scoped package directory: %v\n", err)
+				continue
+			}
+
+			for _, scopedEntry := range scopedEntries {
+				if !scopedEntry.IsDir() {
+					continue
+				}
+
+				pkgPath = filepath.Join(path, pkgName, scopedEntry.Name())
+				pkgName = filepath.Join(pkgName, scopedEntry.Name())
+				wg.Add(1)
+				go processNodeModulesPackage(pkgPath, pkgName, chain, depth, wg, results)
+			}
+		} else {
+			wg.Add(1)
+			go processNodeModulesPackage(pkgPath, pkgName, chain, depth, wg, results)
+		}
+	}
+
+	// Process nested node_modules
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		nestedPath := filepath.Join(path, entry.Name(), "node_modules")
+		if _, err := os.Stat(nestedPath); err == nil {
+			processNodeModules(nestedPath, chain, depth+1, wg, results)
+		}
+	}
+}
+
+// Add helper function to process individual package in node_modules
+func processNodeModulesPackage(pkgPath, pkgName string, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
+	defer wg.Done()
+
+	// Read package.json
+	packageJSONPath := filepath.Join(pkgPath, "package.json")
+	data, err := os.ReadFile(packageJSONPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error reading package.json for %s: %v\n", pkgName, err)
+		return
+	}
+
+	var pkgJSON struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkgJSON); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error parsing package.json for %s: %v\n", pkgName, err)
+		return
+	}
+
+	pkgIdentifier := fmt.Sprintf("%s@%s", pkgName, pkgJSON.Version)
+
+	if _, exists := processedPackages.Load(pkgIdentifier); exists {
+		if verbose {
+			fmt.Printf("📦 Skipping already processed package: %s\n", pkgIdentifier)
+		}
+		return
+	}
+	processedPackages.Store(pkgIdentifier, true)
+
+	scripts, err := readPackageJSON(packageJSONPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error reading scripts for %s: %v\n", pkgName, err)
+		return
+	}
+
+	fullChain := append(chain, pkgIdentifier)
+	if len(scripts) > 0 {
+		results <- PackageInfo{
+			Name:    pkgName,
+			Version: pkgJSON.Version,
+			Scripts: scripts,
+			Depth:   depth,
+			Chain:   fullChain,
+		}
+	}
+
+	if !silent {
+		fmt.Printf("✅ Processed %s @ %s\n", pkgName, pkgJSON.Version)
+	}
+}
+
 func main() {
 	defaultPath := filepath.Join(".", "package-lock.json")
 	lockFilePath := flag.String("lockfile", defaultPath, "Path to package-lock.json file")
 	npmPackage := flag.String("npm", "", "NPM package to analyze (optional)")
 	npmVersion := flag.String("version", "", "NPM package version (optional, defaults to latest)")
-	silentFlag := flag.Bool("silent", false, "Enable silent output")
+	nodeModules := flag.String("node-modules", "", "Path to node_modules directory to analyze (optional)")
+	silentFlag := flag.Bool("silent", false, "Only output JSON results")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
 
@@ -448,7 +578,14 @@ func main() {
 	var results = make(chan PackageInfo, 100)
 	var wg sync.WaitGroup
 
-	if *npmPackage != "" {
+	if *nodeModules != "" {
+		// Process node_modules directory
+		if _, err := os.Stat(*nodeModules); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error: node_modules directory not found: %v\n", err)
+			os.Exit(1)
+		}
+		processNodeModules(*nodeModules, []string{}, 0, &wg, results)
+	} else if *npmPackage != "" {
 		version := *npmVersion
 		if version == "" {
 			version = "latest"
@@ -456,7 +593,7 @@ func main() {
 
 		wg.Add(1)
 		go processNpmPackage(*npmPackage, version, []string{}, 0, &wg, results)
-	} else {
+	} else if *lockFilePath != "" {
 		fmt.Printf("🔍 Analyzing lockfile: %s\n", *lockFilePath)
 
 		file, err := os.Open(*lockFilePath)
@@ -496,6 +633,9 @@ func main() {
 			}
 			processLockDependencies(deps, []string{}, 1, &wg, results)
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "❌ No package or lockfile provided\n")
+		os.Exit(1)
 	}
 
 	// Create a goroutine to close results after all work is done
