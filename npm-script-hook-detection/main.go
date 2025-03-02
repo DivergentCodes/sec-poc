@@ -10,26 +10,22 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 // Lifecycle scripts to capture
-// https://docs.npmjs.com/cli/v11/using-npm/scripts
 var lifecycleScripts = map[string]bool{
 	"preinstall":  true,
-	"install":     true,
 	"postinstall": true,
 
 	"preuninstall":  true,
-	"uninstall":     true,
 	"postuninstall": true,
 
 	"preprepare":  true,
-	"prepare":     true,
 	"postprepare": true,
 
 	"prepublish":  true,
-	"publish":     true,
 	"postpublish": true,
 
 	"prestart":  true,
@@ -51,11 +47,13 @@ var lifecycleScripts = map[string]bool{
 	"postversion": true,
 }
 
-// PackageInfo holds metadata and script hooks
+// PackageInfo holds metadata, script hooks, depth, and dependency chain
 type PackageInfo struct {
 	Name    string            `json:"name"`
 	Version string            `json:"version"`
 	Scripts map[string]string `json:"scripts"`
+	Depth   int               `json:"depth"`
+	Chain   []string          `json:"chain"`
 }
 
 // Fetch package metadata from the NPM registry
@@ -97,14 +95,36 @@ func fetchPackageJSON(pkg, version string) (map[string]interface{}, error) {
 	return packageData, nil
 }
 
-// Reads package.json inside a .tgz file without extracting
+// Generate the correct tarball URL for both namespaced and non-namespaced packages
+func makeNpmTarballURL(pkg, version string) string {
+	// If the package is namespaced (starts with "@"), we need to separate the namespace
+	if strings.HasPrefix(pkg, "@") {
+		// Extract the namespace and package name
+		namespace := pkg[:strings.Index(pkg, "/")]
+		packageName := pkg[strings.Index(pkg, "/")+1:]
+
+		// Construct the URL for namespaced packages
+		return fmt.Sprintf("https://registry.npmjs.org/%s/%s/-/%s-%s.tgz", namespace, packageName, packageName, version)
+	} else {
+		// For non-namespaced packages, the full name is used in both the path and tarball segment
+		return fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", pkg, pkg, version)
+	}
+}
+
+// Fetch package.json from an NPM package tarball, handling scoped packages correctly
 func getLifecycleScripts(pkg, version string) (map[string]string, error) {
-	url := fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", pkg, pkg, version)
+	url := makeNpmTarballURL(pkg, version)
+	fmt.Printf("⬇️ Fetching tarball for %s @ %s from: %s\n", pkg, version, url)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	// Check for HTTP errors
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch package tarball: %s", resp.Status)
+	}
 
 	gzipReader, err := gzip.NewReader(resp.Body)
 	if err != nil {
@@ -112,6 +132,7 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 	}
 	tarReader := tar.NewReader(gzipReader)
 
+	// Loop through files in the tarball to find the package.json
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -121,6 +142,7 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 			return nil, err
 		}
 
+		// Look for the package.json file inside the tarball
 		if header.Name == "package/package.json" {
 			var pkgJSON struct {
 				Scripts map[string]string `json:"scripts"`
@@ -137,14 +159,15 @@ func getLifecycleScripts(pkg, version string) (map[string]string, error) {
 				}
 			}
 
-			// Return only if lifecycle scripts exist
+			// Return lifecycle scripts if any are found
 			if len(lifecycleOnly) > 0 {
 				return lifecycleOnly, nil
 			}
 		}
 	}
 
-	return nil, nil // No lifecycle scripts found
+	// If no lifecycle scripts found
+	return nil, nil
 }
 
 // Parse dependencies from a package.json map
@@ -170,41 +193,56 @@ func parseDependencies(pkgData map[string]interface{}) []string {
 	return packages
 }
 
-// Parse dependencies from a local package.json file
-func getDependenciesFromFile(packageJSONPath string) ([]string, error) {
-	file, err := os.Open(packageJSONPath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var pkg map[string]interface{}
-	if err := json.NewDecoder(file).Decode(&pkg); err != nil {
-		return nil, err
-	}
-
-	return parseDependencies(pkg), nil
-}
-
-// Process an individual package
-func processPackage(pkg string, wg *sync.WaitGroup, results chan<- PackageInfo) {
+// Recursively process dependencies
+func processPackage(pkg string, chain []string, depth int, wg *sync.WaitGroup, results chan<- PackageInfo) {
 	defer wg.Done()
 
 	version, err := getPackageMetadata(pkg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching metadata for %s: %v\n", pkg, err)
+		fmt.Fprintf(os.Stderr, "❌ Error fetching metadata for %s @ %s: %v\n", pkg, version, err)
 		return
 	}
 
 	scripts, err := getLifecycleScripts(pkg, version)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching scripts for %s: %v\n", pkg, err)
+		fmt.Fprintf(os.Stderr, "❌ Error fetching scripts for %s @ %s: %v\n", pkg, version, err)
 		return
 	}
 
+	fullChain := append(chain, fmt.Sprintf("%s@%s", pkg, version))
 	if scripts != nil {
-		results <- PackageInfo{Name: pkg, Version: version, Scripts: scripts}
+		results <- PackageInfo{Name: pkg, Version: version, Scripts: scripts, Depth: depth, Chain: fullChain}
 	}
+
+	pkgData, err := fetchPackageJSON(pkg, version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error fetching package.json for %s @ %s: %v\n", pkg, version, err)
+		return
+	}
+
+	dependencies := parseDependencies(pkgData)
+	fmt.Printf("✅ Processed %s @ %s\n", pkg, version)
+	for _, dep := range dependencies {
+		wg.Add(1)
+		go processPackage(dep, fullChain, depth+1, wg, results)
+	}
+}
+
+// Reads and parses the package.json file to get dependencies
+func getDependenciesFromFile(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var pkgData map[string]interface{}
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&pkgData); err != nil {
+		return nil, err
+	}
+
+	return parseDependencies(pkgData), nil
 }
 
 func main() {
@@ -216,6 +254,7 @@ func main() {
 
 	var packages []string
 	var err error
+	var rootChain []string
 
 	if *npmPackage != "" {
 		// Fetch dependencies from the specified NPM package
@@ -232,6 +271,7 @@ func main() {
 		}
 
 		packages = parseDependencies(pkgData)
+		rootChain = []string{fmt.Sprintf("%s@%s", *npmPackage, version)}
 	} else {
 		// Read dependencies from a local package.json
 		packages, err = getDependenciesFromFile(*packageJSONPath)
@@ -239,6 +279,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error reading dependencies: %v\n", err)
 			os.Exit(1)
 		}
+
+		rootChain = []string{"local-package"}
 	}
 
 	var wg sync.WaitGroup
@@ -246,7 +288,7 @@ func main() {
 
 	for _, pkg := range packages {
 		wg.Add(1)
-		go processPackage(pkg, &wg, results)
+		go processPackage(pkg, rootChain, 1, &wg, results)
 	}
 
 	wg.Wait()
