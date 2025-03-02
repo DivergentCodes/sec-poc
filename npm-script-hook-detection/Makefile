@@ -6,7 +6,7 @@ GO=go
 all: build
 
 build:
-	$(GO) build -o dist/$(BINARY_NAME) main.go
+	$(GO) mod tidy && $(GO) build -o dist/$(BINARY_NAME) main.go
 
 clean:
 	$(GO) clean
