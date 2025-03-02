@@ -427,7 +427,7 @@ func main() {
 		}
 
 		wg.Add(1)
-		go processNpmPackage(*npmPackage, version, []string{"root"}, 0, &wg, results)
+		go processNpmPackage(*npmPackage, version, []string{}, 0, &wg, results)
 	} else {
 		// Process package-lock.json
 		file, err := os.Open(*lockFilePath)
@@ -443,7 +443,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		processLockDependencies(lockFile.Dependencies, []string{"root"}, 1, &wg, results)
+		processLockDependencies(lockFile.Dependencies, []string{}, 1, &wg, results)
 	}
 
 	wg.Wait()
