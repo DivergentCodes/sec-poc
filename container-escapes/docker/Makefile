@@ -10,17 +10,17 @@ build: build-base
 
 # Run all containers
 run: build
-	docker compose up
+	docker compose up -it
 
 # Run specific containers
 run-default: build
-	docker compose up default
+	docker compose run -it --rm default
 
 run-user: build
-	docker compose up user
+	docker compose run -it --rm user
 
 run-privileged: build
-	docker compose up privileged
+	docker compose run -it --rm privileged
 
 # Clean up
 clean:
