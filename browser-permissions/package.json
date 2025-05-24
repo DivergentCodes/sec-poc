@@ -1,0 +1,14 @@
+{
+  "name": "browser-permissions",
+  "version": "1.0.0",
+  "description": "Demo that exercises browser permissions",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "serve": "node server.js",
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC"
+}
