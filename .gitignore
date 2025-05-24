@@ -77,3 +77,6 @@ logs/
 !.yarn/sdks
 !.yarn/versions
 .pnp.*
+
+# Scratch files
+*scratch*
