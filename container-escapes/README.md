@@ -104,19 +104,27 @@ make run-privileged # Run privileged container as root
   - Don't share IPC namespace with host
   - Run as non-root user
 
-#### UTS Namespace Escape
+#### UTS (Unix Time-sharing System) Namespace Escape
 
+- **What is UTS?**
+  - UTS namespace isolates two system identifiers:
+    - Hostname (`uname -n` or `hostname`)
+    - NIS (Network Information Service) domain name (`domainname`)
+  - These identifiers are used by various system services and applications
 - **Prerequisites**:
   - Container running as root
   - Shared UTS namespace with host (`--uts=host`)
 - **Impact**:
-  - Can modify host hostname
-  - Can affect hostname-dependent services
-  - Can potentially confuse monitoring tools
+  - Can modify host's hostname
+  - Can change host's NIS domain name
+  - Can affect services that rely on hostname (e.g., mail servers, web servers)
+  - Can confuse monitoring and logging systems
+  - Can potentially trigger hostname-based security mechanisms
 - **Mitigation**:
   - Use separate UTS namespace
   - Don't share UTS namespace with host
   - Run as non-root user
+  - Configure services to not rely on hostname for security decisions
 
 ### Docker Socket Access
 
