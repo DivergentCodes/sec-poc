@@ -1,0 +1,9 @@
+# Use the base image that contains all common configuration
+FROM container-escape-base:latest
+
+# Use the pre-existing, unprivileged ubuntu user
+USER ubuntu
+WORKDIR /home/ubuntu
+
+# Set the entrypoint to a shell for interactive testing
+ENTRYPOINT ["/bin/bash"]
