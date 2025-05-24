@@ -1,0 +1,34 @@
+services:
+  # Service running with default configuration (root user)
+  default:
+    build:
+      context: .
+      dockerfile: Dockerfile.default
+    image: container-escape-default
+    volumes:
+      - ./data:/data:ro
+    tty: true
+    stdin_open: true
+
+  # Service running as an unprivileged user
+  user:
+    build:
+      context: .
+      dockerfile: Dockerfile.user
+    image: container-escape-user
+    volumes:
+      - ./data:/data:ro
+    tty: true
+    stdin_open: true
+
+  # Service for testing container escapes with dangerous capabilities
+  privileged:
+    build:
+      context: .
+      dockerfile: Dockerfile.default  # Uses root user for privileged mode
+    image: container-escape-privileged
+    privileged: true  # Grants ALL Linux capabilities and disables most security restrictions
+    volumes:
+      - /:/host:ro  # Mount host filesystem as read-only for testing
+    tty: true
+    stdin_open: true
