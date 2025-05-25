@@ -16,6 +16,30 @@ make run-user       # Run as regular user
 make run-privileged # Run privileged container as root
 ```
 
+## Host OS Considerations
+
+### Docker Desktop for Mac
+
+When running on macOS using Docker Desktop, some escape techniques may not work as expected because:
+
+- Containers run in a lightweight VM (hyperkit) rather than directly on the host
+- Host filesystem access is mediated through a special filesystem layer (osxfs/gRPC-FUSE)
+- The actual host is macOS, not Linux
+- Some Linux-specific escape vectors are not applicable
+
+Specifically affected escape types:
+
+- **Mount Escapes**: Limited by Docker's macOS filesystem integration
+- **Kernel Exploits**: Target the VM's kernel, not the macOS host
+- **Device Node Escapes**: Limited by VM isolation
+- **Shared Namespace Escapes**: Namespace isolation is VM-level
+
+For testing Linux container escapes, it's recommended to use:
+
+- A native Linux host
+- A Linux VM
+- A cloud-based Linux environment
+
 ## Escape Types
 
 ### Mount Escape
