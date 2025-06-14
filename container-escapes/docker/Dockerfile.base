@@ -1,0 +1,29 @@
+# Define the target name for the base image
+FROM ubuntu:24.04 AS container-escape-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    netcat-openbsd \
+    net-tools \
+    iproute2 \
+    iputils-ping \
+    procps \
+    vim \
+    python3 \
+    python3-pip \
+    gcc \
+    make \
+    strace \
+    ltrace \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create test directory and add test script
+RUN mkdir -p /test
+COPY showenv.sh /test/
+RUN chmod +x /test/showenv.sh
+
+# Set the entrypoint to a shell for interactive testing
+ENTRYPOINT ["/bin/bash"]
