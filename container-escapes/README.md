@@ -1,6 +1,6 @@
-# Container Escape PoC
+# Container Escape PoC Environment
 
-This PoC explores and demonstrates container escapes in different environments.
+This PoC creates environments for exploring container escapes.
 
 ## Environments
 
@@ -300,3 +300,4 @@ For testing Linux container escapes, it's recommended to use:
    - Regular security audits
    - Implement logging and alerting
    - Use runtime security profiles
+

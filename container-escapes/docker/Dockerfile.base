@@ -1,5 +1,5 @@
 # Define the target name for the base image
-FROM ubuntu:24.04 as container-escape-base
+FROM ubuntu:24.04 AS container-escape-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
