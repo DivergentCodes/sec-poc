@@ -1,0 +1,20 @@
+FROM ubuntu:24.04
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    nginx \
+    curl \
+    net-tools \
+    iproute2 \
+    iputils-ping \
+    nmap \
+    tcpdump \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ./site-b-service/* /var/www/html/
+
+# Expose port 80
+EXPOSE 80
+
+# Start NGINX in the foreground
+CMD ["nginx", "-g", "daemon off;"]
