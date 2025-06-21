@@ -1,0 +1,7 @@
+# Generated secrets
+secrets/
+*.secrets
+.env
+
+# Keep the example secrets file
+!secrets.example

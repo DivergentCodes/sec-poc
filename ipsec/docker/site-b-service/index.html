@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Site B Web Service</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .timestamp {
+      color: #666;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Welcome to Site B Web Service</h1>
+    <p>This is a test web service running in Site B's network (172.21.0.0/16).</p>
+    <p>If you can see this page, the IPSec tunnel is working correctly!</p>
+    <p class="timestamp">Page served at: <span id="timestamp"></span></p>
+  </div>
+  <script>
+    document.getElementById('timestamp').textContent = new Date().toISOString();
+  </script>
+</body>
+
+</html>

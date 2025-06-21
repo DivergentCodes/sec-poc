@@ -1,0 +1,68 @@
+services:
+  ipsec-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipsec
+    environment:
+      - LOCAL_PRIVATE_CIDR=192.168.120.0/24
+      - REMOTE_PRIVATE_CIDR=192.168.130.0/24
+    container_name: ipsec-a
+    cap_add: [ NET_ADMIN ]
+    sysctls: [ "net.ipv4.ip_forward=1" ]
+    networks:
+      public-net:
+        ipv4_address: 10.10.218.2
+      net-a:
+        ipv4_address: 192.168.120.2
+    volumes:
+      - ./site-a-vpn/strongswan.d/libstrongswan-plugins.conf:/etc/strongswan.d/libstrongswan-plugins.conf
+      - ./site-a-vpn/swanctl/swanctl.conf:/etc/swanctl/swanctl.conf
+      - ./site-a-vpn/swanctl/conf.d:/etc/swanctl/conf.d
+    depends_on:
+      - ipsec-b
+
+  ipsec-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.ipsec
+    environment:
+      - LOCAL_PRIVATE_CIDR=192.168.130.0/24
+      - REMOTE_PRIVATE_CIDR=192.168.120.0/24
+    container_name: ipsec-b
+    cap_add: [ NET_ADMIN ]
+    sysctls: [ "net.ipv4.ip_forward=1" ]
+    networks:
+      public-net:
+        ipv4_address: 10.10.218.3
+      net-b:
+        ipv4_address: 192.168.130.3
+    volumes:
+      - ./site-b-vpn/strongswan.d/libstrongswan-plugins.conf:/etc/strongswan.d/libstrongswan-plugins.conf
+      - ./site-b-vpn/swanctl/swanctl.conf:/etc/swanctl/swanctl.conf
+      - ./site-b-vpn/swanctl/conf.d:/etc/swanctl/conf.d
+
+  service-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: service-b
+    networks:
+      net-b:
+        ipv4_address: 192.168.130.30
+
+networks:
+  public-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.218.0/24
+  net-a:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.120.0/24
+  net-b:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.130.0/24
