@@ -1,0 +1,29 @@
+#!/bin/bash
+
+function usage() {
+    script_name=$(basename "$0")
+    printf "This script makes a SIP call to a target phone number using a SIP server.\n\n"
+    printf "Usage:\n"
+    printf "\tcat <<EOF > .env\n"
+    printf "\tSIP_SERVER=my.sip.provider.com\n"
+    printf "\tSIP_USERNAME=bob\n"
+    printf "\tSIP_PASSWORD=hunter2\n"
+    printf "\tSIP_PHONE_NUMBER=18005554444\n"
+    printf "\tTARGET_PHONE_NUMBER=15035556666\n"
+    printf "\tEOF\n"
+    printf "\tdocker run --rm --env-file .env sipcall\n\n"
+}
+
+if [ -z "$SIP_SERVER" ] || [ -z "$SIP_USERNAME" ] || [ -z "$SIP_PASSWORD" ] || [ -z "$SIP_PHONE_NUMBER" ] || [ -z "$TARGET_PHONE_NUMBER" ]; then
+    usage
+    exit 1
+fi
+
+# Configure the SIP account
+account="<sip:+$SIP_PHONE_NUMBER@$SIP_SERVER>;auth_user=$SIP_USERNAME;auth_pass=$SIP_PASSWORD;regint=0"
+echo $account > /home/baresip/.baresip/accounts
+
+baresip -v \
+  -f /home/baresip/.baresip \
+  -e "/ausrc aufile,/home/baresip/audio.wav" \
+  -e "d sip:+$TARGET_PHONE_NUMBER@$SIP_SERVER"
