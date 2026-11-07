@@ -471,8 +471,14 @@ func handleConnection(clientConn net.Conn) {
 		log.Printf("Failed to parse ClientHello: %v", err)
 	}
 
+	// A ClientHello that fails to parse is treated as having no SNI.
+	sni := ""
+	if clientHello != nil {
+		sni = clientHello.ServerName
+	}
+
 	count := 0
-	isEmptySNI := clientHello == nil || clientHello.ServerName == ""
+	isEmptySNI := sni == ""
 
 	if defaultDeny && isEmptySNI {
 		logTLSConnection(clientConn, origDst, "", ActionBlocked, 0, "empty SNI")
@@ -481,14 +487,14 @@ func handleConnection(clientConn net.Conn) {
 	}
 
 	if !isEmptySNI {
-		count, matched := isDomainInList(clientHello.ServerName)
+		count, matched := isDomainInList(sni)
 		if defaultDeny && !matched {
-			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "not in allow-list")
+			logTLSConnection(clientConn, origDst, sni, ActionBlocked, count, "not in allow-list")
 			blockConnection(clientConn, TLSAccessDenied)
 			return
 		}
 		if !defaultDeny && matched {
-			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "in block-list")
+			logTLSConnection(clientConn, origDst, sni, ActionBlocked, count, "in block-list")
 			blockConnection(clientConn, TLSAccessDenied)
 			return
 		}
@@ -496,8 +502,8 @@ func handleConnection(clientConn net.Conn) {
 		// Verify only names the list allows, so a denied SNI never makes the
 		// filter dial the client's chosen destination.
 		if verifyCerts {
-			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
+			if err := verifyCertificate(origDst, sni); err != nil {
+				logTLSConnection(clientConn, origDst, sni, ActionBlocked, count, "invalid certificate")
 				blockConnection(clientConn, TLSBadCertificate)
 				return
 			}
@@ -505,7 +511,7 @@ func handleConnection(clientConn net.Conn) {
 	}
 
 	// Allow
-	logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count, "")
+	logTLSConnection(clientConn, origDst, sni, ActionAllowed, count, "")
 	allowConnection(clientConn, origDst, fullHeader, record)
 }
 
@@ -565,10 +571,15 @@ func allowConnection(clientConn net.Conn, origDst string, header []byte, record 
 	}
 	defer serverConn.Close()
 
-	if header != nil && record != nil {
-		// Forward the handshake
-		serverConn.Write(header)
-		serverConn.Write(record)
+	// Forward whatever was already read from the client before relaying the rest
+	for _, buf := range [][]byte{header, record} {
+		if len(buf) == 0 {
+			continue
+		}
+		if _, err := serverConn.Write(buf); err != nil {
+			log.Printf("Failed to forward to original destination %s: %v", origDst, err)
+			return
+		}
 	}
 
 	// Continue proxying
