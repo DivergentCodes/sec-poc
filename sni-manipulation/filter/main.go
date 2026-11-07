@@ -414,31 +414,25 @@ func handleConnection(clientConn net.Conn) {
 	firstByte := make([]byte, 1)
 	n, err := clientConn.Read(firstByte)
 	if err != nil || n == 0 {
-		allowConnection(clientConn, origDst, nil, nil)
+		handleNonTLS(clientConn, origDst, nil, "no data")
 		return
 	}
 
-	// If it's not a TLS handshake (0x16), allow the connection
+	// If it's not a TLS handshake (0x16), there is no SNI to check
 	if firstByte[0] != 0x16 {
-		allowConnection(clientConn, origDst, firstByte, nil)
+		handleNonTLS(clientConn, origDst, firstByte, "not a TLS handshake")
 		return
 	}
 
 	// Read the rest of the TLS record header
 	header := make([]byte, TLSRecordHeaderLength-1) // -1 because we already read the first byte
 	if _, err := io.ReadFull(clientConn, header); err != nil {
-		allowConnection(clientConn, origDst, firstByte, nil)
+		handleNonTLS(clientConn, origDst, firstByte, "incomplete TLS record header")
 		return
 	}
 
 	// Combine the first byte with the rest of the header
 	fullHeader := append(firstByte, header...)
-
-	// Verify TLS handshake
-	if fullHeader[0] != 0x16 { // TLS Handshake
-		allowConnection(clientConn, origDst, fullHeader, nil)
-		return
-	}
 
 	// Get record length
 	recordLen := uint16(fullHeader[3])<<8 | uint16(fullHeader[4])
@@ -496,6 +490,18 @@ func handleConnection(clientConn net.Conn) {
 	// Allow
 	logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count, "")
 	allowConnection(clientConn, origDst, fullHeader, record)
+}
+
+// Handle a connection that never presented a ClientHello. Without an SNI there
+// is nothing to match against the list, so default deny closes it rather than
+// relaying arbitrary bytes to the client's chosen destination.
+func handleNonTLS(clientConn net.Conn, origDst string, header []byte, reason string) {
+	if defaultDeny {
+		log.Printf("%s non-TLS connection from [%s] to [%s] (%s)", ActionBlocked, clientConn.RemoteAddr(), origDst, reason)
+		clientConn.Close()
+		return
+	}
+	allowConnection(clientConn, origDst, header, nil)
 }
 
 // Log a TLS connection.
