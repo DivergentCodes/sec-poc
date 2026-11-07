@@ -37,6 +37,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -90,7 +91,8 @@ const (
 )
 
 var (
-	domainList      map[string]int
+	domainListMu    sync.RWMutex
+	domainList      map[string]*atomic.Int64
 	defaultDeny     bool
 	verifyCerts     bool
 	certValidations = &certCache{
@@ -120,7 +122,6 @@ func main() {
 	}
 
 	// Initialize domain filtering
-	domainList = make(map[string]int)
 	defaultDeny = *defaultAction == "deny"
 	verifyCerts = *verifyFlag
 
@@ -185,6 +186,7 @@ func loadDomainList(filename string) error {
 	}
 	defer file.Close()
 
+	domains := make(map[string]*atomic.Int64)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		domain := strings.TrimSpace(scanner.Text())
@@ -192,7 +194,7 @@ func loadDomainList(filename string) error {
 			continue
 		}
 
-		domainList[domain] = 0
+		domains[domain] = new(atomic.Int64)
 		if defaultDeny {
 			log.Printf("Allowing domain: %s", domain)
 		} else {
@@ -200,15 +202,25 @@ func loadDomainList(filename string) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	domainListMu.Lock()
+	domainList = domains
+	domainListMu.Unlock()
+	return nil
 }
 
-// Check if a domain is in the list.
+// Check if a domain is in the list. Connections are handled concurrently, so
+// the map is only read under the lock and each match counter is atomic.
 func isDomainInList(domain string) (int, bool) {
-	for pattern := range domainList {
+	domainListMu.RLock()
+	defer domainListMu.RUnlock()
+
+	for pattern, counter := range domainList {
 		if isSubdomainMatch(domain, pattern) {
-			domainList[pattern]++ // Increment counter for the matching pattern
-			return domainList[pattern], true
+			return int(counter.Add(1)), true
 		}
 	}
 	return 0, false
@@ -419,31 +431,25 @@ func handleConnection(clientConn net.Conn) {
 	firstByte := make([]byte, 1)
 	n, err := clientConn.Read(firstByte)
 	if err != nil || n == 0 {
-		allowConnection(clientConn, origDst, nil, nil)
+		handleNonTLS(clientConn, origDst, nil, "no data")
 		return
 	}
 
-	// If it's not a TLS handshake (0x16), allow the connection
+	// If it's not a TLS handshake (0x16), there is no SNI to check
 	if firstByte[0] != 0x16 {
-		allowConnection(clientConn, origDst, firstByte, nil)
+		handleNonTLS(clientConn, origDst, firstByte, "not a TLS handshake")
 		return
 	}
 
 	// Read the rest of the TLS record header
 	header := make([]byte, TLSRecordHeaderLength-1) // -1 because we already read the first byte
 	if _, err := io.ReadFull(clientConn, header); err != nil {
-		allowConnection(clientConn, origDst, firstByte, nil)
+		handleNonTLS(clientConn, origDst, firstByte, "incomplete TLS record header")
 		return
 	}
 
 	// Combine the first byte with the rest of the header
 	fullHeader := append(firstByte, header...)
-
-	// Verify TLS handshake
-	if fullHeader[0] != 0x16 { // TLS Handshake
-		allowConnection(clientConn, origDst, fullHeader, nil)
-		return
-	}
 
 	// Get record length
 	recordLen := uint16(fullHeader[3])<<8 | uint16(fullHeader[4])
@@ -475,14 +481,6 @@ func handleConnection(clientConn net.Conn) {
 	}
 
 	if !isEmptySNI {
-		if verifyCerts {
-			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
-				blockConnection(clientConn, TLSBadCertificate)
-				return
-			}
-		}
-
 		count, matched := isDomainInList(clientHello.ServerName)
 		if defaultDeny && !matched {
 			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "not in allow-list")
@@ -494,11 +492,33 @@ func handleConnection(clientConn net.Conn) {
 			blockConnection(clientConn, TLSAccessDenied)
 			return
 		}
+
+		// Verify only names the list allows, so a denied SNI never makes the
+		// filter dial the client's chosen destination.
+		if verifyCerts {
+			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
+				blockConnection(clientConn, TLSBadCertificate)
+				return
+			}
+		}
 	}
 
 	// Allow
 	logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionAllowed, count, "")
 	allowConnection(clientConn, origDst, fullHeader, record)
+}
+
+// Handle a connection that never presented a ClientHello. Without an SNI there
+// is nothing to match against the list, so default deny closes it rather than
+// relaying arbitrary bytes to the client's chosen destination.
+func handleNonTLS(clientConn net.Conn, origDst string, header []byte, reason string) {
+	if defaultDeny {
+		log.Printf("%s non-TLS connection from [%s] to [%s] (%s)", ActionBlocked, clientConn.RemoteAddr(), origDst, reason)
+		clientConn.Close()
+		return
+	}
+	allowConnection(clientConn, origDst, header, nil)
 }
 
 // Log a TLS connection.
