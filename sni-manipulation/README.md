@@ -125,6 +125,19 @@ Blocked TLS connection from [10.0.2.50:58322] to [100.26.145.239:443] with SNI [
 
 The filtering proxy asked the attacker's server for a certificate for `google.com` and tried to validate it. When the attacker's server did not have a valid certificate for `google.com`, the filtering proxy blocked the connection.
 
+### Plaintext HTTP Filtering by Host Header
+
+Filtering only port 443 leaves plaintext HTTP on port 80 unfiltered. The `--http-port` flag starts a second listener that applies the same domain list to the `Host` header of the first request on each connection, and answers a blocked request with `403 Forbidden`.
+
+Redirect port 80 to it alongside the HTTPS rule:
+
+```sh
+/sbin/iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3129
+./filter --domain-file domains.txt --default deny --verify --http-port 3129
+```
+
+A `Host` header is as easy to forge as an SNI value, and plaintext has no certificate to check. With `--verify`, the filter instead requires the original destination to be one of the addresses the `Host` name resolves to from the filter host. DNS answers that rotate faster than the client's own lookup can cause false blocks.
+
 ## Ethical Considerations
 
 This example is intended for educational and research purposes only. Always obtain proper authorization before testing on any networks or systems you do not own or have explicit permission to test.

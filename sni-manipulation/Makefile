@@ -39,8 +39,8 @@ build-server:
 	cd server && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_SERVER)-linux-amd64 main.go
 
 build-filter:
-	cd filter && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER) main.go
-	cd filter && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER)-linux-amd64 main.go
+	cd filter && $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER) .
+	cd filter && GOOS=linux GOARCH=amd64 $(GOBUILD) -o ../$(DIST_DIR)/$(BINARY_NAME_FILTER)-linux-amd64 .
 
 clean:
 	$(GOCLEAN)
