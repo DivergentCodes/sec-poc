@@ -37,6 +37,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -90,7 +91,8 @@ const (
 )
 
 var (
-	domainList      map[string]int
+	domainListMu    sync.RWMutex
+	domainList      map[string]*atomic.Int64
 	defaultDeny     bool
 	verifyCerts     bool
 	certValidations = &certCache{
@@ -119,7 +121,6 @@ func main() {
 	}
 
 	// Initialize domain filtering
-	domainList = make(map[string]int)
 	defaultDeny = *defaultAction == "deny"
 	verifyCerts = *verifyFlag
 
@@ -180,6 +181,7 @@ func loadDomainList(filename string) error {
 	}
 	defer file.Close()
 
+	domains := make(map[string]*atomic.Int64)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		domain := strings.TrimSpace(scanner.Text())
@@ -187,7 +189,7 @@ func loadDomainList(filename string) error {
 			continue
 		}
 
-		domainList[domain] = 0
+		domains[domain] = new(atomic.Int64)
 		if defaultDeny {
 			log.Printf("Allowing domain: %s", domain)
 		} else {
@@ -195,15 +197,25 @@ func loadDomainList(filename string) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	domainListMu.Lock()
+	domainList = domains
+	domainListMu.Unlock()
+	return nil
 }
 
-// Check if a domain is in the list.
+// Check if a domain is in the list. Connections are handled concurrently, so
+// the map is only read under the lock and each match counter is atomic.
 func isDomainInList(domain string) (int, bool) {
-	for pattern := range domainList {
+	domainListMu.RLock()
+	defer domainListMu.RUnlock()
+
+	for pattern, counter := range domainList {
 		if isSubdomainMatch(domain, pattern) {
-			domainList[pattern]++ // Increment counter for the matching pattern
-			return domainList[pattern], true
+			return int(counter.Add(1)), true
 		}
 	}
 	return 0, false
