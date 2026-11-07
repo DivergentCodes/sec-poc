@@ -106,7 +106,8 @@ func main() {
 	listenPort := flag.String("port", "3130", "Local port to listen on")
 	domainFile := flag.String("domain-file", "", "File containing domain rules (one domain per line)")
 	defaultAction := flag.String("default", "", "Default action (allow/deny) for unlisted domains")
-	verifyFlag := flag.Bool("verify", false, "Verify server certificates match SNI")
+	verifyFlag := flag.Bool("verify", false, "Verify server certificates match SNI, and plaintext HTTP destinations match Host")
+	httpPort := flag.String("http-port", "", "Local port for plaintext HTTP filtered by Host header (disabled when empty)")
 	flag.Parse()
 
 	// Check if required arguments are provided
@@ -140,6 +141,10 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("TLS filter listening on port %s", *listenPort)
+
+	if *httpPort != "" {
+		go serveHTTP(*httpPort)
+	}
 
 	// Start cache cleanup goroutine
 	go func() {
