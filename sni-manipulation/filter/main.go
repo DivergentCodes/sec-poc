@@ -464,14 +464,6 @@ func handleConnection(clientConn net.Conn) {
 	}
 
 	if !isEmptySNI {
-		if verifyCerts {
-			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
-				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
-				blockConnection(clientConn, TLSBadCertificate)
-				return
-			}
-		}
-
 		count, matched := isDomainInList(clientHello.ServerName)
 		if defaultDeny && !matched {
 			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "not in allow-list")
@@ -482,6 +474,16 @@ func handleConnection(clientConn net.Conn) {
 			logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "in block-list")
 			blockConnection(clientConn, TLSAccessDenied)
 			return
+		}
+
+		// Verify only names the list allows, so a denied SNI never makes the
+		// filter dial the client's chosen destination.
+		if verifyCerts {
+			if err := verifyCertificate(origDst, clientHello.ServerName); err != nil {
+				logTLSConnection(clientConn, origDst, clientHello.ServerName, ActionBlocked, count, "invalid certificate")
+				blockConnection(clientConn, TLSBadCertificate)
+				return
+			}
 		}
 	}
 
